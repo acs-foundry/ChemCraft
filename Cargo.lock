@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "chemcraft"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "eframe",
  "egui",
@@ -671,9 +671,10 @@ dependencies = [
 
 [[package]]
 name = "chemcraft-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "clap",
+ "craftbio-scene",
  "mol-admet-bridge",
  "mol-engine",
  "mol-graph",
@@ -683,6 +684,15 @@ dependencies = [
  "mol-vector",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "chrono"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -819,6 +829,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-ipc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=52d2560c183b2df8b1ffc25ca2078683af146fd6#52d2560c183b2df8b1ffc25ca2078683af146fd6"
+dependencies = [
+ "chrono",
+ "getrandom 0.2.17",
+ "interprocess",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "widestring",
+]
+
+[[package]]
+name = "craftbio-scene"
+version = "0.2.0"
+dependencies = [
+ "craft-ipc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -940,6 +975,12 @@ checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
  "libloading",
 ]
+
+[[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
 
 [[package]]
 name = "document-features"
@@ -1704,6 +1745,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "interprocess"
+version = "2.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb02ffbf25e8ef0f4a95bff054eef75f6d1bf16919474cf2caa63b21997478a"
+dependencies = [
+ "doctest-file",
+ "libc",
+ "recvmsg",
+ "widestring",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1948,7 +2002,7 @@ dependencies = [
 
 [[package]]
 name = "mol-admet-bridge"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "csv",
  "flate2",
@@ -1961,7 +2015,7 @@ dependencies = [
 
 [[package]]
 name = "mol-engine"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -1979,7 +2033,7 @@ dependencies = [
 
 [[package]]
 name = "mol-graph"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "csv",
  "serde",
@@ -1988,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "mol-peptide"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mol-admet-bridge",
  "mol-graph",
@@ -1999,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "mol-sar"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mol-admet-bridge",
  "mol-graph",
@@ -2010,7 +2064,7 @@ dependencies = [
 
 [[package]]
 name = "mol-synth"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mol-graph",
  "mol-sar",
@@ -2022,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "mol-vector"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "flate2",
  "mol-graph",
@@ -2751,6 +2805,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2941,6 +3001,17 @@ name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -3802,6 +3873,12 @@ dependencies = [
  "log",
  "web-sys",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi"

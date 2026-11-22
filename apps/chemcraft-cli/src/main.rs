@@ -418,6 +418,17 @@ enum SubCmd {
         #[command(subcommand)]
         action: NrpCmd,
     },
+    /// Push a 3D PDB (or build a 3D peptide/NRP/SMILES) directly into a running BiomolCraft window over Craft Link v1 (`craft-ipc`).
+    LinkBiomol {
+        #[arg(long)]
+        pdb: Option<PathBuf>,
+        #[arg(long)]
+        smiles: Option<String>,
+        #[arg(long)]
+        nrp: Option<String>,
+        #[arg(long)]
+        module: Option<String>,
+    },
     /// Start the hardened MCP server (stdio or TCP with token + sandbox).
     Mcp {
         #[arg(long)]
@@ -987,6 +998,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         SubCmd::Nrp { action } => {
             run_nrp_command(action)?;
+        }
+        SubCmd::LinkBiomol {
+            pdb,
+            smiles,
+            nrp,
+            module,
+        } => {
+            let target_path = if let Some(p) = pdb {
+                p
+            } else if let Some(spec) = nrp {
+                let cat = default_monomer_catalog();
+                let conf = PeptideConformation::from_str_lossy("ring")
+                    .unwrap_or(PeptideConformation::BetaStrand);
+                let built = build_peptide_or_nrp(&spec, conf, &cat)?;
+                let out = std::env::temp_dir().join("chemcraft_link_nrp.pdb");
+                std::fs::write(&out, write_pdb(&built.mol))?;
+                out
+            } else if let Some(smi) = smiles {
+                let mut mol = parse_smiles(&smi)?;
+                ensure_3d_coords(&mut mol);
+                let out = std::env::temp_dir().join("chemcraft_link_mol.pdb");
+                std::fs::write(&out, write_pdb(&mol))?;
+                out
+            } else {
+                return Err("provide --pdb, --nrp, or --smiles".into());
+            };
+            let reply = craftbio_scene::push_pdb_to_live_biomolcraft(
+                "chemcraft",
+                &target_path.display().to_string(),
+                module.as_deref(),
+            )?;
+            println!("Craft Link v1 → BiomolCraft: {reply}");
         }
     }
     Ok(())
