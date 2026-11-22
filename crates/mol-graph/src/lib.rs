@@ -25,7 +25,7 @@ pub use analysis::{
 pub use cdxml::{parse_cdxml, write_cdxml};
 pub use coords3d::{
     compute_3d_coords, covalent_radius, ensure_3d_coords, generate_3d_coords, ideal_bond_length,
-    write_pdb, write_sdf_v2000_3d,
+    place_nerf_atom, relax_3d_coords_pinned, write_pdb, write_sdf_v2000_3d,
 };
 pub use dwar::{
     TabularMolRecord, parse_csv_records, parse_csv_records_with_limit, parse_dwar,

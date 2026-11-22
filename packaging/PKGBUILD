@@ -1,6 +1,6 @@
 # Maintainer: S-Mas
 pkgname=chemcraft
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Local-first clean-room 2D vector molecular design & SAR studio integrated with AdmetCraft"
 arch=('x86_64')

@@ -1,9 +1,9 @@
-# ChemCraft
+# ChemCraft v0.4.0
 
-**Local-First, Clean-Room 2D Vector + 3D Molecular Design, Peptide Builder & SAR Studio in Pure Rust**  
-*(Works side-by-side with [`AdmetCraft`](../AdmetCraft) for deep ADMET/PK & [`ChimeraX`](https://www.cgl.ucsf.edu/chimerax/) for macromolecular 3D)*
+**Local-First, Clean-Room 2D Vector + 3D Molecular Design, Peptide & Non-Ribosomal Peptide (NRP / NRPS) Studio, Retrosynthesis & SAR Workbench in Pure Rust**  
+*(Works side-by-side with [`AdmetCraft`](../AdmetCraft) for deep ADMET/PK, [`DockCraft`](../DockCraft) for 3D SBDD/MD/FEP & [`ChimeraX`](https://www.cgl.ucsf.edu/chimerax/) for macromolecular 3D)*
 
-`ChemCraft` combines ChemDraw/VectorCraft-style 2D chemical drawing, interactive pure-Rust 3D molecular visualization, a 2D+3D canonical L-peptide builder, DataWarrior-style in-memory SAR exploration (ECFP4 Tanimoto, SMARTS, Matched Molecular Pairs & Activity Cliffs), one-click **UCSF ChimeraX** 3D handoff, and live `< 5 ms` ADMET previews with optional delegation to external **`AdmetCraft`** — all written in **100% safe, offline pure Rust** (`#![forbid(unsafe_code)]`, zero `.unwrap()` / `.expect()` / `panic!()`).
+`ChemCraft v0.4.0` combines ChemDraw/VectorCraft-style 2D chemical drawing, interactive pure-Rust 3D molecular visualization, a dedicated **Peptide & Non-Ribosomal Peptide (NRP / NRPS) Design Studio** (`crates/mol-peptide`: 57+ base monomers / 100+ L/D/NMe stereomonomers, macrocycles, depsipeptides, lariats, disulfides, RCM/click staples, Pistoia HELM I/O, Stachelhaus 10-aa NRPS biosynthesis & antiSMASH `.gbk` importer, bRo5 developability, proteolysis & ESI-MS, Fmoc-SPPS vs. NRPS planning, and Ala/D/NMe/Staple scans), DataWarrior-style SAR exploration (ECFP4 Tanimoto, SMARTS, MMP & Activity Cliffs), Retro\* synthesis planning, one-click **UCSF ChimeraX / DockCraft / AdmetCraft** handoff — all written in **100% safe, offline pure Rust** (`#![forbid(unsafe_code)]`, zero `.unwrap()` / `.expect()` / `panic!()`).
 
 ---
 
@@ -17,18 +17,19 @@
 
 ---
 
-## Architecture (8-Crate Cargo Workspace)
+## Architecture (9-Crate Cargo Workspace)
 
 | Layer | Crate / App | Role |
 |---|---|---|
-| L0 | `crates/mol-graph` | Clean-room editable `MolGraph`, SSSR ring basis, iterative Hückel aromaticity, valence diagnostics, Cahn-Ingold-Prelog `R/S` & `E/Z` stereo, canonical SMILES, SMARTS subgraph matching, SDF **V2000 & V3000**, **ChemDraw `.cdxml`** bidirectional reader/writer, **MDL `.rxn` V2000** reaction & stoichiometry/yield engine, **Analysis Window** (exact monoisotopic mass, elemental analysis `%C/%H/...`, DBE, ESI+/ESI- MS adducts), **30 Superatom/Protecting Groups** (`Boc`, `Fmoc`, `Cbz`, `Ph`, `Bn`, `CF3`, `CO2Me`, `SO2Me`, ...), **Name-to-Structure** (110+ drugs/solvents + systematic IUPAC parser), DataWarrior `.dwar`, CSV, bioisostere mutation, pure-Rust **3D conformer generator** (chiral-volume & Jacobi MDS cage embedding, PDB/3D-SDF V2000+V3000), and **20-AA 2D+3D Peptide Builder** |
+| L0 | `crates/mol-graph` | Clean-room editable `MolGraph`, unbounded GF(2) SSSR macrocycle ring basis, iterative Hückel aromaticity, valence diagnostics, Cahn-Ingold-Prelog `R/S` & `E/Z` stereo, canonical SMILES, SMARTS subgraph matching, SDF **V2000 & V3000**, **ChemDraw `.cdxml`** bidirectional reader/writer, **MDL `.rxn` V2000** reaction & stoichiometry/yield engine, **Analysis Window** (exact monoisotopic mass, elemental analysis `%C/%H/...`, DBE, ESI+/ESI- MS adducts), **30 Superatom/Protecting Groups** (`Boc`, `Fmoc`, `Cbz`, `Ph`, `Bn`, `CF3`, `CO2Me`, `SO2Me`, ...), **Name-to-Structure** (110+ drugs/solvents + systematic IUPAC parser), DataWarrior `.dwar`, CSV, bioisostere mutation, pure-Rust **3D conformer generator** (chiral-volume & Jacobi MDS cage embedding, PDB with `SSBOND` & `CONECT`, 3D-SDF V2000+V3000), and **20-AA 2D+3D Peptide Builder** |
 | L1 | `crates/mol-vector` | 2D layout generator (fused/spiro/bridged rings + `Clean Structure 2D`), **ACS Document 1996** (`B&W` / `Color`) & Modern depiction presets with optional terminal `CH3`, ring-snapping templates, ring-aligned double/triple/aromatic bonds, stereo wedges/hashes/wavy/dative arrows, label collision resolution, and **SVG / EPS / FlateDecode PDF / PNG** export (single or multi-molecule grid) |
 | L2 | `crates/mol-admet-bridge` | Decoupled `AdmetProvider` trait + standalone pure-Rust ADMET preview engine (**exact Ertl 2000 TPSA**, **Wildman-Crippen 1999 WLOGP/MR**, strict rotatable bonds), **`1H` & `13C` NMR chemical shift/multiplicity predictor**, external `admetcraft-cli` delegation (`eval`/`batch` + BOILED-Egg SVG handoff), and `admetcraft` GUI launcher — zero sibling path dependencies |
 | L2 | `crates/mol-sar` | In-memory SAR compound table, 2048-bit ECFP4 (`MorganFp`) fingerprints, `rayon`-parallel Tanimoto/SMARTS/numeric filtering, deterministic Matched Molecular Pairs (MMP), duplicate detection, Activity Cliffs (`SALI`), and Ligand Efficiency (`LE`, `LLE`) |
-| L2 | `crates/mol-synth` | **Buy-Before-Make & Retro* Multi-Step Retrosynthesis Engine** (`v0.3.0`): curated commercial MedChem building-block index (172 built-in BBs + auto-loaded `.tsv`/`.smi` catalogs in `CRAFT_DATA_DIR/building_blocks`, default `/home/acs/Datos/CraftBio/building_blocks/`), ECFP4 Tanimoto nearest-stock analog finder, 25+ graph-level MedChem disconnections (Amide/Macrolactam, Urea/Carbamate CDI, Ester/Macrolactone, Sulfonamide, SNAr, Buchwald-Hartwig, Williamson/Macroether, Indole/Heterocycle N-Alkylation & Macrocyclization, Reductive Amination, Suzuki-Miyaura, Sonogashira, Heck, Grignard, Friedel-Crafts, BHC Pd-Carbonylation, Tetrazole & CuAAC Click, Ketone/Nitro Reduction, Sulfone Oxidation), chemoselectivity & protecting-group alerts, memoized Retro* AND-OR search, backward-propagated forward stoichiometry (`mg`/`mmol`), MDL `.rxn` V2000 & ELN Markdown protocol export |
-| L3 | `crates/mol-engine` | Session state, Copy-on-Write structural Undo/Redo (`Arc` snapshots), `CommandRegistry` (including click-and-drag `ConnectAtoms`, `CycleBondOrder`, `AdjustAtomCharge`, `AttachSuperatomGroup`, `FlipCanvas2D`, `RotateCanvas2D`, `LoadChemicalName`, `LoadCdxml`, `BuildPeptide`), bounded `.chemcraft` ZIP+JSON archives (`O_EXCL` atomic save), **ChimeraX `.pdb`/`.sdf`+`.cxc` bundle launcher**, **DockCraft 3D SDF/SMILES handoff & pH 7.4-aware sidecar merger**, and kernel-confined `PathSandbox` (`openat2` with `RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS`) |
-| L4 | `apps/chemcraft-cli` | Headless CLI (`render --acs1996`, `analyze`, `nmr`, `name`, `group`, `cdxml`, `rxn`, `retro`, `peptide`, `export3d`, `chimerax`, `dockcraft`, `dock-results`, `library`, `filter`, `enrich`, `mmp`, `inspect`) + strict JSON-RPC 2.0 **MCP server** (`stdio` & `--tcp` with constant-time bearer auth) |
-| L5 | `apps/chemcraft` | Native `egui` / `eframe` ChemDraw-grade desktop studio: click-and-drag 30°-snapped bond drawing & ring closing, click bond to cycle order, `+`/`-` formal charges, 24 superatom stamps, `Flip H/V` & `Rot 30°`, `ACS 1996` toggle, Name-to-Structure bar, `.cdxml`/`.rxn`/native file picker (`Browse...`), Tabbed Inspector (`Analysis` \| `1H/13C NMR` \| `Reaction` \| `ADMET`), `2D / 3D / Split 2D+3D` viewports, optional **SAR Explorer**, on-demand **`Synth Module`** panel (hidden by default; opened via top `Synth Module` toggle or `Tools -> Synth Module...`), and **ChimeraX / DockCraft / AdmetCraft** launchers |
+| L2 | `crates/mol-synth` | **Buy-Before-Make & Retro* Multi-Step Retrosynthesis Engine**: built-in starter MedChem building-block index (172 starter BBs for offline tests & demos, extensible via user-supplied real supplier `.tsv`/`.smi` catalogs such as Enamine/Mcule/eMolecules in `CRAFT_DATA_DIR/building_blocks`, default `/home/acs/Datos/CraftBio/building_blocks/`), ECFP4 Tanimoto nearest-stock analog finder, 25+ graph-level MedChem disconnections, chemoselectivity & protecting-group alerts, memoized Retro* AND-OR search, backward-propagated forward stoichiometry (`mg`/`mmol`), MDL `.rxn` V2000 & ELN Markdown protocol export |
+| L2 | `crates/mol-peptide` | **Peptide & Non-Ribosomal Peptide (NRP / NRPS) Design Engine (`v0.4.0`)**: 57+ curated base monomers (>100 L/D/NMe stereomonomers incl. `Bmt`, `Orn`, `Dab`, `Kyn`, `Hpg`, `Dpg`, `Bht`, `Aad`, `mGlu`, `Abu`, `Pip`, `Aib`, `Hiv`, `Lac`, `Thz`/`Oxz`, `S5`/`R8`, `Pra`/`Aha` + 14 N-caps/lipids + custom JSON in `CRAFT_DATA_DIR/monomers/`), extended notation & **Pistoia Alliance HELM** round-trip I/O, exact macrocycle/depsipeptide/lariat/disulfide/RCM-staple/CuAAC-click/δ-amide 2D+3D assembly (verified to exact literature formula & monoisotopic mass on **Cyclosporin A, Gramicidin S, Cilengitide, Octreotide, Polymyxin B1, Daptomycin, ACV Tripeptide, Semaglutide core**), modular **NRPS BGC biosynthesis engine** (probabilistic 10-aa Stachelhaus A-domain predictor, `E -> C_DCL`/`Cy`/`TE` interface audit, **antiSMASH `.gbk` importer**, forward BGC compilation, reverse BGC blueprinting & domain-swap evaluator), **bRo5 Oral Macrocycle developability**, exact `pI`, GRAVY/$\mu_H$, **protease cleavage map** (Trypsin/Chymotrypsin/Elastase/DPP-4 `Aib2`), ESI-MS & `b/y` fragments, **Fmoc-SPPS vs. NRPS planner**, and **Ala/D-AA/N-Me/RCM-Staple optimization scans** |
+| L3 | `crates/mol-engine` | Session state, Copy-on-Write structural Undo/Redo (`Arc` snapshots), `CommandRegistry`, bounded `.chemcraft` ZIP+JSON archives (`O_EXCL` atomic save), **ChimeraX `.pdb`/`.sdf`+`.cxc` bundle launcher**, **DockCraft 3D SDF/SMILES handoff & pH 7.4-aware sidecar merger**, and kernel-confined `PathSandbox` (`openat2` with `RESOLVE_BENEATH \| RESOLVE_NO_SYMLINKS`) |
+| L4 | `apps/chemcraft-cli` | Headless CLI (`render --acs1996`, `analyze`, `nmr`, `name`, `group`, `cdxml`, `rxn`, `retro`, `peptide`, **`nrp {build, bgc, scan, presets}`**, `export3d`, `chimerax`, `dockcraft`, `dock-results`, `library`, `filter`, `enrich`, `mmp`, `inspect`) + strict JSON-RPC 2.0 **MCP server** (19 tools over `stdio` & `--tcp` with constant-time bearer auth, incl. `design_peptide_nrp`, `analyze_nrps_bgc`, `generate_peptide_scan`) |
+| L5 | `apps/chemcraft` | Native `egui` / `eframe` ChemDraw-grade desktop studio with `2D / 3D / Split 2D+3D` viewports, optional **SAR Explorer**, on-demand **`Peptide & NRP Studio`** and **`Synth Module`** windows (hidden by default), and **ChimeraX / DockCraft / AdmetCraft** launchers |
 
 ---
 
@@ -73,6 +74,15 @@ chemcraft-cli enrich library.sdf --with-admet --out admet_report.pdf --format pd
 # Build a canonical L-peptide in 2D + 3D and export SVG + PDB
 chemcraft-cli peptide "Ac-Ala-Gly-Tyr-Ser-NH2" --ss alpha --svg peptide.svg --pdb peptide.pdb
 
+# Peptide & Non-Ribosomal Peptide (NRP / NRPS) Studio CLI (v0.4.0)
+chemcraft-cli nrp presets --monomers
+chemcraft-cli nrp build cyclosporin_a --svg cyclosporin_a.svg --pdb cyclosporin_a.pdb --report-md csa_dossier.md
+chemcraft-cli nrp build "cyclo(Arg-Gly-Asp-D-Phe-NMe-Val)" --sdf3d cilengitide_3d.sdf --helm-out cilengitide.helm
+chemcraft-cli nrp bgc --preset gramicidin_s --swap 3:Ile --out-json grs_swap.json
+chemcraft-cli nrp bgc --stachelhaus DAWTIAAVCK
+chemcraft-cli nrp bgc --antismash-gbk cluster.gbk --out-md cluster_report.md
+chemcraft-cli nrp scan "Ac-Arg-Gly-Asp-Phe-Val-NH2" --mode nme --out-csv nme_scan.csv --out-sdf nme_3d.sdf
+
 # Export a 3D conformer from SMILES to PDB or 3D SDF V2000
 chemcraft-cli export3d "CC(=O)Oc1ccccc1C(=O)O" --out aspirin_3d.pdb --format pdb
 
@@ -106,7 +116,10 @@ chemcraft-cli mcp --read-root ./data --write-root ./exports --tcp 127.0.0.1:7878
 - `export_3d`: Generates 3D conformers from SMILES or peptides and writes PDB or 3D SDF inside `--write-root`.
 - `export_chimerax`: Exports self-contained ChimeraX `.pdb`/`.sdf` + `.cxc` scripts inside `--write-root`.
 - `screen_library`: Streams built-in presets or sandboxed `.sdf`/`.sdf.gz`/`.smi`/`.smi.gz`/`.csv`/`.dwar` chemical libraries through ADMET/SMARTS/MaxMin funnels, ionizes at pH 7.4, generates 3D coordinates, and writes DockCraft-ready 3D SDF files inside `--write-root`.
-- `plan_synthesis`: Runs Buy-Before-Make commercial stock lookup + Retro* multi-step retrosynthesis planning with reagents, backward-propagated stoichiometry, chemoselectivity/PG alerts, and optional ELN Markdown export inside `--write-root`.
+- `plan_synthesis`: Runs Buy-Before-Make starter/custom catalog lookup + Retro* multi-step retrosynthesis planning with reagents, backward-propagated stoichiometry, chemoselectivity/PG alerts, and optional ELN Markdown export inside `--write-root`.
+- `design_peptide_nrp`: Builds linear, cyclic, depsipeptide, lariat, disulfide, or stapled Peptides & NRPs (extended notation, landmark preset, or Pistoia HELM), returning canonical SMILES, HELM, bRo5 developability, proteolysis audit, ESI-MS ions, Fmoc-SPPS vs. NRPS plan, and optional `.svg`/`.pdb`/`.sdf`/`.md` exports inside `--write-root`.
+- `analyze_nrps_bgc`: Compiles curated or antiSMASH `.gbk` NRPS BGCs, predicts probabilistic 10-aa Stachelhaus A-domain specificities, reverse-designs BGCs from sequences, and evaluates module domain-swaps inside the sandbox.
+- `generate_peptide_scan`: Generates Alanine, D-Amino Acid, N-Methyl, or `i,i+4` RCM Staple optimization libraries with bRo5/proteolysis deltas and writes 3D `.sdf`/`.csv` inside `--write-root`.
 
 ## Clean-Room & Scientific Scope Notes
 - Zero third-party proprietary code (`ChemDraw`, `MarvinSketch`, `DataWarrior`).

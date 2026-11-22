@@ -20,6 +20,13 @@ use mol_graph::{
     parse_reaction_smiles, parse_rxn_v2000, parse_smiles, resolve_chemical_name, write_cdxml,
     write_pdb, write_rxn_v2000, write_sdf_v2000, write_sdf_v2000_3d,
 };
+use mol_peptide::{
+    NrpsBgc, PeptideConformation, ScanMode, analyze_peptide_developability, build_peptide_or_nrp,
+    compile_nrps_bgc, default_monomer_catalog, design_nrps_from_peptide, landmark_nrp_presets,
+    parse_antismash_gbk, parse_peptide_spec, plan_spps_vs_nrps, predict_a_domain_specificity,
+    preset_nrps_bgc, propose_nrps_swap, render_developability_markdown, render_nrps_markdown,
+    render_scan_csv, render_spps_markdown, run_peptide_scan,
+};
 use mol_sar::{
     SarFilter, SarTable, find_activity_cliffs, find_duplicate_compounds,
     find_matched_molecular_pairs,
@@ -79,6 +86,116 @@ impl From<PeptideSsCli> for SecondaryStructure {
 enum Export3dFormat {
     Pdb,
     Sdf3d,
+}
+
+#[derive(Debug, Subcommand)]
+enum NrpCmd {
+    /// Build any linear, cyclic, depsipeptide, lariat, disulfide, or stapled Peptide / NRP (notation, preset ID, or HELM) with bRo5 developability, proteolysis, ESI-MS, and SPPS plan.
+    Build {
+        /// Extended sequence (`cyclo(Arg-Gly-Asp-D-Phe-NMe-Val)`), preset ID (`cyclosporin_a`, `daptomycin`, `polymyxin_b1`, `gramicidin_s`, `cilengitide`, `octreotide`, `acv_tripeptide`, `semaglutide_core`), or HELM string.
+        spec: String,
+        /// 3D conformation (`ring` | `alpha` | `beta` | `extended` | `ppii` | `hairpin`).
+        #[arg(long, default_value = "beta")]
+        ss: String,
+        /// Optional SVG output path (2D depiction).
+        #[arg(long)]
+        svg: Option<PathBuf>,
+        /// Optional PDB output path (with SSBOND + CONECT records).
+        #[arg(long)]
+        pdb: Option<PathBuf>,
+        /// Optional 3D SDF V2000/V3000 output path.
+        #[arg(long)]
+        sdf3d: Option<PathBuf>,
+        /// Optional Pistoia HELM output path.
+        #[arg(long)]
+        helm_out: Option<PathBuf>,
+        /// Optional Markdown developability + SPPS dossier output path.
+        #[arg(long)]
+        report_md: Option<PathBuf>,
+        /// Optional JSON report output path.
+        #[arg(long)]
+        out_json: Option<PathBuf>,
+        /// Export 3D DockCraft handoff bundle.
+        #[arg(long)]
+        send_dockcraft: bool,
+        /// Export ChimeraX `.pdb`/`.sdf` + `.cxc` bundle.
+        #[arg(long)]
+        send_chimerax: bool,
+        /// Print raw JSON summary to stdout instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Analyze, compile, reverse-design, or engineer (domain-swap) an NRPS Biosynthetic Gene Cluster (preset, JSON, antiSMASH `.gbk`, or Stachelhaus 10-aa code).
+    Bgc {
+        /// Curated BGC preset (`gramicidin_s`, `acv`, `polymyxin_b1`, `daptomycin`).
+        #[arg(long)]
+        preset: Option<String>,
+        /// Input NRPS BGC JSON file.
+        #[arg(long)]
+        input_json: Option<PathBuf>,
+        /// Input antiSMASH GenBank `.gbk` file.
+        #[arg(long)]
+        antismash_gbk: Option<PathBuf>,
+        /// Reverse-design a minimal NRPS BGC blueprint from a peptide/NRP notation or preset.
+        #[arg(long)]
+        from_seq: Option<String>,
+        /// Predict probabilistic substrate candidates from a 10-aa Stachelhaus A-domain code.
+        #[arg(long)]
+        stachelhaus: Option<String>,
+        /// Evaluate a module A-domain swap (`MOD:MONOMER`, e.g. `3:Ile`).
+        #[arg(long)]
+        swap: Option<String>,
+        /// Write NRPS compilation/audit JSON.
+        #[arg(long)]
+        out_json: Option<PathBuf>,
+        /// Write NRPS report Markdown.
+        #[arg(long)]
+        out_md: Option<PathBuf>,
+        /// Write compiled 3D product PDB.
+        #[arg(long)]
+        pdb: Option<PathBuf>,
+        /// Write compiled 3D product SDF.
+        #[arg(long)]
+        sdf3d: Option<PathBuf>,
+        /// Write compiled 2D SVG depiction.
+        #[arg(long)]
+        svg: Option<PathBuf>,
+        /// Print raw JSON on stdout instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a combinatorial peptide optimization scan (`ala` | `d-scan` | `nme` | `staple`).
+    Scan {
+        /// Parent peptide/NRP notation, preset ID, or HELM string.
+        spec: String,
+        /// Scan mode (`ala` | `d-scan` | `nme` | `staple`).
+        #[arg(long, default_value = "nme")]
+        mode: String,
+        /// Write scan CSV summary table.
+        #[arg(long)]
+        out_csv: Option<PathBuf>,
+        /// Write 3D multi-molecule SDF of all scanned analogs.
+        #[arg(long)]
+        out_sdf: Option<PathBuf>,
+        /// Write JSON summary.
+        #[arg(long)]
+        out_json: Option<PathBuf>,
+        /// Export DockCraft 3D handoff bundle for all variants.
+        #[arg(long)]
+        send_dockcraft: bool,
+        /// Print raw JSON on stdout instead of compact table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List all curated landmark NRP presets and monomer catalog entries.
+    Presets {
+        /// Also list all built-in monomer codes and N-terminal caps.
+        #[arg(long)]
+        monomers: bool,
+        /// Output as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -295,6 +412,11 @@ enum SubCmd {
         /// Initialize/export the default MedChem building-block TSV catalog in CRAFT_DATA_DIR/building_blocks.
         #[arg(long)]
         init_stock: bool,
+    },
+    /// Peptide & Non-Ribosomal Peptide (NRP / NRPS) Design Studio CLI (`build`, `bgc`, `scan`, `presets`).
+    Nrp {
+        #[command(subcommand)]
+        action: NrpCmd,
     },
     /// Start the hardened MCP server (stdio or TCP with token + sandbox).
     Mcp {
@@ -863,6 +985,257 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("{}", plan.render_markdown());
         }
+        SubCmd::Nrp { action } => {
+            run_nrp_command(action)?;
+        }
+    }
+    Ok(())
+}
+
+fn run_nrp_command(action: NrpCmd) -> Result<(), Box<dyn std::error::Error>> {
+    let cat = default_monomer_catalog();
+    match action {
+        NrpCmd::Presets { monomers, json } => {
+            let presets = landmark_nrp_presets();
+            if json {
+                let mut payload = serde_json::json!({
+                    "presets": presets,
+                    "base_monomer_count": cat.monomers.len(),
+                    "stereomonomer_count": cat.total_stereomonomer_count(),
+                    "n_cap_count": cat.n_caps.len(),
+                });
+                if monomers && let Some(obj) = payload.as_object_mut() {
+                    obj.insert("monomers".to_string(), serde_json::to_value(&cat.monomers)?);
+                    obj.insert("n_caps".to_string(), serde_json::to_value(&cat.n_caps)?);
+                }
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!(
+                    "ChemCraft v{} — Peptide & NRP Presets ({} base monomers / {} L+D stereomonomers, {} N-caps):",
+                    env!("CARGO_PKG_VERSION"),
+                    cat.monomers.len(),
+                    cat.total_stereomonomer_count(),
+                    cat.n_caps.len()
+                );
+                for p in &presets {
+                    println!(
+                        "  - {:<18} | {:<15} | {:>9.4} Da | {}",
+                        p.id, p.expected_formula, p.expected_monoisotopic_mass, p.name
+                    );
+                }
+                if monomers {
+                    println!("\nBuilt-in Monomers:");
+                    for m in &cat.monomers {
+                        println!(
+                            "  - {:<10} [{}] {} (chiral={}, anchor={:?})",
+                            m.code,
+                            m.class.label(),
+                            m.name,
+                            m.has_alpha_chiral,
+                            m.anchor_kind
+                        );
+                    }
+                    println!("\nN-Terminal Caps & Fatty-Acyl Starters:");
+                    for c in &cat.n_caps {
+                        println!("  - {:<16} {}", c.code, c.name);
+                    }
+                }
+            }
+        }
+        NrpCmd::Build {
+            spec,
+            ss,
+            svg,
+            pdb,
+            sdf3d,
+            helm_out,
+            report_md,
+            out_json,
+            send_dockcraft,
+            send_chimerax,
+            json,
+        } => {
+            let conf = PeptideConformation::from_str_lossy(&ss)
+                .ok_or_else(|| format!("unknown conformation '{ss}'"))?;
+            let built = build_peptide_or_nrp(&spec, conf, &cat)?;
+            let dev = analyze_peptide_developability(&built, &cat);
+            let spps = plan_spps_vs_nrps(&built.spec, &cat);
+
+            if let Some(p) = svg {
+                let scene = build_mol_scene(&built.mol, &SceneStyle::default(), &[]);
+                std::fs::write(&p, scene_to_svg(&scene))?;
+            }
+            if let Some(p) = pdb {
+                std::fs::write(&p, write_pdb(&built.mol))?;
+            }
+            if let Some(p) = sdf3d {
+                std::fs::write(&p, write_sdf_v2000_3d(&[&built.mol]))?;
+            }
+            if let Some(p) = helm_out {
+                std::fs::write(&p, format!("{}\n", built.helm))?;
+            }
+            let mut full_md = render_developability_markdown(&dev);
+            full_md.push_str("\n---\n\n");
+            full_md.push_str(&render_spps_markdown(&spps));
+            if let Some(p) = report_md {
+                std::fs::write(&p, &full_md)?;
+            }
+            if send_dockcraft {
+                let dir = default_dockcraft_handoff_dir();
+                let bundle = write_dockcraft_bundle(&[&built.mol], &dir, Some("nrp_target"))?;
+                eprintln!("DockCraft handoff bundle -> {}", bundle.sdf_path.display());
+            }
+            if send_chimerax {
+                let dir = default_chimerax_export_dir();
+                let bundle = write_chimerax_bundle(&built.mol, &dir, Some("nrp_target"))?;
+                eprintln!("ChimeraX 3D bundle -> {}", bundle.script_path.display());
+            }
+
+            let payload = serde_json::json!({
+                "developability": dev,
+                "spps_plan": spps,
+            });
+            if let Some(p) = out_json {
+                std::fs::write(&p, serde_json::to_string_pretty(&payload)?)?;
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!("{full_md}");
+            }
+        }
+        NrpCmd::Bgc {
+            preset,
+            input_json,
+            antismash_gbk,
+            from_seq,
+            stachelhaus,
+            swap,
+            out_json,
+            out_md,
+            pdb,
+            sdf3d,
+            svg,
+            json,
+        } => {
+            if let Some(code) = stachelhaus {
+                let pred = predict_a_domain_specificity(&code);
+                if let Some(p) = out_json {
+                    std::fs::write(&p, serde_json::to_string_pretty(&pred)?)?;
+                }
+                println!("{}", serde_json::to_string_pretty(&pred)?);
+                return Ok(());
+            }
+
+            let bgc: NrpsBgc = if let Some(pid) = preset {
+                preset_nrps_bgc(&pid).ok_or_else(|| {
+                    format!("unknown NRPS BGC preset '{pid}' (expected gramicidin_s, acv, polymyxin_b1, daptomycin)")
+                })?
+            } else if let Some(jp) = input_json {
+                let txt = std::fs::read_to_string(&jp)?;
+                serde_json::from_str(&txt)?
+            } else if let Some(gp) = antismash_gbk {
+                let txt = std::fs::read_to_string(&gp)?;
+                parse_antismash_gbk(&txt)?
+            } else if let Some(seq) = from_seq {
+                let spec = parse_peptide_spec(&seq, &cat, PeptideConformation::BetaStrand)?;
+                design_nrps_from_peptide(&spec)
+            } else {
+                return Err(
+                    "provide one of --preset, --input-json, --antismash-gbk, --from-seq, or --stachelhaus"
+                        .into(),
+                );
+            };
+
+            if let Some(sw) = swap {
+                let (mod_s, mon_s) = sw
+                    .split_once(':')
+                    .ok_or("expected --swap MOD:MONOMER (e.g. 3:Ile)")?;
+                let mod_idx: usize = mod_s.trim().parse()?;
+                let (ev, built) = propose_nrps_swap(&bgc, mod_idx, mon_s.trim(), &cat)?;
+                if let Some(p) = pdb {
+                    std::fs::write(&p, write_pdb(&built.mol))?;
+                }
+                if let Some(p) = sdf3d {
+                    std::fs::write(&p, write_sdf_v2000_3d(&[&built.mol]))?;
+                }
+                if let Some(p) = svg {
+                    let scene = build_mol_scene(&built.mol, &SceneStyle::default(), &[]);
+                    std::fs::write(&p, scene_to_svg(&scene))?;
+                }
+                if let Some(p) = out_json {
+                    std::fs::write(&p, serde_json::to_string_pretty(&ev)?)?;
+                }
+                println!("{}", serde_json::to_string_pretty(&ev)?);
+                return Ok(());
+            }
+
+            let (rep, built) = compile_nrps_bgc(&bgc, &cat)?;
+            let md = render_nrps_markdown(&rep);
+            if let Some(p) = out_json {
+                std::fs::write(&p, serde_json::to_string_pretty(&rep)?)?;
+            }
+            if let Some(p) = out_md {
+                std::fs::write(&p, &md)?;
+            }
+            if let Some(p) = pdb {
+                std::fs::write(&p, write_pdb(&built.mol))?;
+            }
+            if let Some(p) = sdf3d {
+                std::fs::write(&p, write_sdf_v2000_3d(&[&built.mol]))?;
+            }
+            if let Some(p) = svg {
+                let scene = build_mol_scene(&built.mol, &SceneStyle::default(), &[]);
+                std::fs::write(&p, scene_to_svg(&scene))?;
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rep)?);
+            } else {
+                println!("{md}");
+            }
+        }
+        NrpCmd::Scan {
+            spec,
+            mode,
+            out_csv,
+            out_sdf,
+            out_json,
+            send_dockcraft,
+            json,
+        } => {
+            let scan_mode = ScanMode::from_str_lossy(&mode).ok_or_else(|| {
+                format!("unknown scan mode '{mode}' (expected ala|d-scan|nme|staple)")
+            })?;
+            let parsed = parse_peptide_spec(&spec, &cat, PeptideConformation::BetaStrand)?;
+            let bundle = run_peptide_scan(&parsed, scan_mode, &cat)?;
+            if let Some(p) = out_csv {
+                std::fs::write(&p, render_scan_csv(&bundle))?;
+            }
+            if let Some(p) = out_sdf {
+                let refs: Vec<&MolGraph> = bundle.built_mols.iter().map(|b| &b.mol).collect();
+                std::fs::write(&p, write_sdf_v2000_3d(&refs))?;
+            }
+            if send_dockcraft {
+                let dir = default_dockcraft_handoff_dir();
+                let mols: Vec<&MolGraph> = bundle.built_mols.iter().map(|b| &b.mol).collect();
+                let hb = write_dockcraft_bundle(&mols, &dir, Some("nrp_scan"))?;
+                eprintln!("DockCraft scan bundle -> {}", hb.sdf_path.display());
+            }
+            let payload = serde_json::json!({
+                "mode": bundle.mode.label(),
+                "parent": bundle.parent,
+                "variant_count": bundle.variants.len(),
+                "variants": bundle.variants,
+            });
+            if let Some(p) = out_json {
+                std::fs::write(&p, serde_json::to_string_pretty(&payload)?)?;
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!("{}", render_scan_csv(&bundle));
+            }
+        }
     }
     Ok(())
 }
@@ -1420,6 +1793,100 @@ mod tests {
         let md = std::fs::read_to_string(wdir.join("paracetamol_eln.md"))?;
         assert!(md.contains("Paracetamol"));
         assert!(md.contains("Shopping List"));
+
+        let _ = std::fs::remove_dir_all(&base);
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_nrp_peptide_bgc_and_scan_tools_enforce_sandbox() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let base = std::env::temp_dir().join("chemcraft_mcp_nrp_test");
+        let _ = std::fs::remove_dir_all(&base);
+        let wdir = base.join("write");
+        std::fs::create_dir_all(&wdir)?;
+
+        let sb = PathSandbox::new(None, Some(&wdir))?;
+        let req = [
+            serde_json::json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{}})
+                .to_string(),
+            serde_json::json!({
+                "jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{
+                    "name":"design_peptide_nrp",
+                    "arguments":{
+                        "spec":"cyclosporin_a",
+                        "conformation":"ring",
+                        "output_pdb":"csa.pdb",
+                        "output_md":"csa.md"
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "jsonrpc":"2.0","id":2,"method":"tools/call",
+                "params":{
+                    "name":"analyze_nrps_bgc",
+                    "arguments":{
+                        "preset":"gramicidin_s",
+                        "swap_module":3,
+                        "swap_monomer":"Ile",
+                        "output_pdb":"grs_ile.pdb"
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "jsonrpc":"2.0","id":3,"method":"tools/call",
+                "params":{
+                    "name":"generate_peptide_scan",
+                    "arguments":{
+                        "spec":"Ac-Arg-Gly-Asp-Phe-Val-NH2",
+                        "mode":"nme",
+                        "output_csv":"nme_scan.csv",
+                        "output_sdf3d":"nme_scan.sdf"
+                    }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "jsonrpc":"2.0","id":4,"method":"tools/call",
+                "params":{
+                    "name":"design_peptide_nrp",
+                    "arguments":{
+                        "spec":"cilengitide",
+                        "output_pdb":"../escape.pdb"
+                    }
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n")
+            + "\n";
+
+        let mut out_buf = Vec::new();
+        mcp::serve_stream_for_test(BufReader::new(req.as_bytes()), &mut out_buf, &sb, None)?;
+        let lines: Vec<serde_json::Value> = String::from_utf8(out_buf)?
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()?;
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1]["result"]["isError"], false);
+        assert_eq!(
+            lines[1]["result"]["structuredContent"]["developability"]["formula"],
+            "C62H111N11O12"
+        );
+        assert_eq!(lines[2]["result"]["isError"], false);
+        assert_eq!(lines[3]["result"]["isError"], false);
+        assert_eq!(lines[3]["result"]["structuredContent"]["variant_count"], 5);
+        // Sandbox escape blocked
+        assert_eq!(lines[4]["result"]["isError"], true);
+        assert!(wdir.join("csa.pdb").exists());
+        assert!(wdir.join("csa.md").exists());
+        assert!(wdir.join("grs_ile.pdb").exists());
+        assert!(wdir.join("nme_scan.csv").exists());
+        assert!(wdir.join("nme_scan.sdf").exists());
 
         let _ = std::fs::remove_dir_all(&base);
         Ok(())

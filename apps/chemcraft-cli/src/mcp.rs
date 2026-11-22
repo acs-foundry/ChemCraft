@@ -696,7 +696,7 @@ fn mcp_tool_catalog() -> Value {
         },
         {
             "name": "plan_synthesis",
-            "description": "Run Buy-Before-Make commercial building-block lookup + Retro* multi-step retrosynthesis planning with reagents, stoichiometry, chemoselectivity warnings, and optional ELN Markdown export.",
+            "description": "Run Buy-Before-Make building-block lookup + Retro* multi-step retrosynthesis planning with reagents, stoichiometry, chemoselectivity warnings, and optional ELN Markdown export.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -708,6 +708,53 @@ fn mcp_tool_catalog() -> Value {
                     "out_md_path": { "type": "string" }
                 },
                 "required": ["smiles"]
+            }
+        },
+        {
+            "name": "design_peptide_nrp",
+            "description": "Build any linear, cyclic, depsipeptide, lariat, disulfide, or stapled Peptide / Non-Ribosomal Peptide (notation, preset ID, or Pistoia HELM), returning canonical SMILES, HELM, bRo5 developability, proteolysis map, ESI-MS ions, Fmoc-SPPS vs NRPS plan, and optional sandboxed .svg/.pdb/.sdf/.md exports.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": { "type": "string" },
+                    "conformation": { "type": "string", "enum": ["ring", "alpha", "beta", "extended", "ppii", "hairpin"] },
+                    "output_svg": { "type": "string" },
+                    "output_pdb": { "type": "string" },
+                    "output_sdf3d": { "type": "string" },
+                    "output_md": { "type": "string" }
+                },
+                "required": ["spec"]
+            }
+        },
+        {
+            "name": "analyze_nrps_bgc",
+            "description": "Compile a preset or custom NRPS BGC (or antiSMASH .gbk inside --read-root), predict probabilistic 10-aa Stachelhaus A-domain specificities, reverse-design a BGC from a peptide sequence, or evaluate a module domain-swap.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "preset": { "type": "string", "enum": ["gramicidin_s", "acv", "polymyxin_b1", "daptomycin"] },
+                    "stachelhaus": { "type": "string" },
+                    "from_seq": { "type": "string" },
+                    "antismash_gbk_path": { "type": "string" },
+                    "swap_module": { "type": "integer", "minimum": 1 },
+                    "swap_monomer": { "type": "string" },
+                    "output_md": { "type": "string" },
+                    "output_pdb": { "type": "string" }
+                }
+            }
+        },
+        {
+            "name": "generate_peptide_scan",
+            "description": "Run a systematic Alanine, D-Amino Acid, N-Methyl, or i,i+4 RCM Staple optimization scan on a peptide/NRP and optionally write CSV / 3D SDF inside --write-root.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "spec": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["ala", "d-scan", "nme", "staple"] },
+                    "output_csv": { "type": "string" },
+                    "output_sdf3d": { "type": "string" }
+                },
+                "required": ["spec", "mode"]
             }
         }
     ])
@@ -731,6 +778,9 @@ fn dispatch_tool(name: &str, args: &Value, sandbox: &PathSandbox) -> Result<Valu
         "rxn_stoichiometry" => tool_rxn_stoichiometry(args, sandbox),
         "attach_superatom" => tool_attach_superatom(args),
         "plan_synthesis" => tool_plan_synthesis(args, sandbox),
+        "design_peptide_nrp" => tool_design_peptide_nrp(args, sandbox),
+        "analyze_nrps_bgc" => tool_analyze_nrps_bgc(args, sandbox),
+        "generate_peptide_scan" => tool_generate_peptide_scan(args, sandbox),
         other => Err(format!("unknown tool '{other}'")),
     }
 }
@@ -1659,4 +1709,261 @@ fn tool_plan_synthesis(args: &Value, sandbox: &PathSandbox) -> Result<Value, Str
         obj.insert("written_md_path".to_string(), json!(p));
     }
     Ok(tool_ok(summary, payload))
+}
+
+fn tool_design_peptide_nrp(args: &Value, sandbox: &PathSandbox) -> Result<Value, String> {
+    let spec_str = args
+        .get("spec")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "missing required 'spec'".to_string())?;
+    let conf_s = args
+        .get("conformation")
+        .and_then(Value::as_str)
+        .unwrap_or("beta");
+    let conf = mol_peptide::PeptideConformation::from_str_lossy(conf_s)
+        .ok_or_else(|| format!("unknown conformation '{conf_s}'"))?;
+    let cat = mol_peptide::default_monomer_catalog();
+    let built = match mol_peptide::build_peptide_or_nrp(spec_str, conf, &cat) {
+        Ok(b) => b,
+        Err(e) => return Ok(tool_err(format!("peptide/NRP build failed: {e}"))),
+    };
+    let dev = mol_peptide::analyze_peptide_developability(&built, &cat);
+    let spps = mol_peptide::plan_spps_vs_nrps(&built.spec, &cat);
+
+    let mut written_svg = None;
+    let mut written_pdb = None;
+    let mut written_sdf3d = None;
+    let mut written_md = None;
+
+    if let Some(rel) = args.get("output_svg").and_then(Value::as_str) {
+        let scene = build_mol_scene(&built.mol, &SceneStyle::default(), &[]);
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(scene_to_svg(&scene).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_svg = Some(resolved.display().to_string());
+    }
+    if let Some(rel) = args.get("output_pdb").and_then(Value::as_str) {
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(write_pdb(&built.mol).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_pdb = Some(resolved.display().to_string());
+    }
+    if let Some(rel) = args.get("output_sdf3d").and_then(Value::as_str) {
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(write_sdf_v2000_3d(&[&built.mol]).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_sdf3d = Some(resolved.display().to_string());
+    }
+    if let Some(rel) = args.get("output_md").and_then(Value::as_str) {
+        let mut md = mol_peptide::render_developability_markdown(&dev);
+        md.push_str("\n---\n\n");
+        md.push_str(&mol_peptide::render_spps_markdown(&spps));
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(md.as_bytes()).map_err(|e| e.to_string())?;
+        written_md = Some(resolved.display().to_string());
+    }
+
+    Ok(tool_ok(
+        format!(
+            "Built {} ({}, {:.4} Da, bRo5 {:.3})",
+            dev.name, dev.formula, dev.monoisotopic_mass, dev.bro5_oral_score
+        ),
+        json!({
+            "developability": dev,
+            "spps_plan": spps,
+            "written_svg": written_svg,
+            "written_pdb": written_pdb,
+            "written_sdf3d": written_sdf3d,
+            "written_md": written_md,
+        }),
+    ))
+}
+
+fn tool_analyze_nrps_bgc(args: &Value, sandbox: &PathSandbox) -> Result<Value, String> {
+    let cat = mol_peptide::default_monomer_catalog();
+    if let Some(code) = args.get("stachelhaus").and_then(Value::as_str) {
+        let pred = mol_peptide::predict_a_domain_specificity(code);
+        return Ok(tool_ok(
+            format!(
+                "Stachelhaus {} -> {} ({})",
+                pred.query_code,
+                pred.candidates
+                    .first()
+                    .map_or("?", |c| c.monomer_code.as_str()),
+                pred.confidence
+            ),
+            serde_json::to_value(&pred).unwrap_or_else(|_| json!({})),
+        ));
+    }
+
+    let bgc = if let Some(pid) = args.get("preset").and_then(Value::as_str) {
+        match mol_peptide::preset_nrps_bgc(pid) {
+            Some(b) => b,
+            None => return Ok(tool_err(format!("unknown NRPS BGC preset '{pid}'"))),
+        }
+    } else if let Some(seq) = args.get("from_seq").and_then(Value::as_str) {
+        let spec = match mol_peptide::parse_peptide_spec(
+            seq,
+            &cat,
+            mol_peptide::PeptideConformation::BetaStrand,
+        ) {
+            Ok(s) => s,
+            Err(e) => return Ok(tool_err(format!("invalid sequence: {e}"))),
+        };
+        mol_peptide::design_nrps_from_peptide(&spec)
+    } else if let Some(gbk_rel) = args.get("antismash_gbk_path").and_then(Value::as_str) {
+        let (_, gbk_txt) =
+            match sandbox.read_to_string_limited(Path::new(gbk_rel), MAX_MCP_INPUT_FILE_BYTES) {
+                Ok(r) => r,
+                Err(e) => return Ok(tool_err(format!("read sandbox error: {e}"))),
+            };
+        match mol_peptide::parse_antismash_gbk(&gbk_txt) {
+            Ok(b) => b,
+            Err(e) => return Ok(tool_err(format!("antiSMASH parse error: {e}"))),
+        }
+    } else {
+        return Ok(tool_err(
+            "provide 'stachelhaus', 'preset', 'from_seq', or 'antismash_gbk_path'".to_string(),
+        ));
+    };
+
+    if let (Some(mod_i), Some(new_mon)) = (
+        args.get("swap_module").and_then(Value::as_u64),
+        args.get("swap_monomer").and_then(Value::as_str),
+    ) {
+        let (ev, built) = match mol_peptide::propose_nrps_swap(&bgc, mod_i as usize, new_mon, &cat)
+        {
+            Ok(x) => x,
+            Err(e) => return Ok(tool_err(format!("domain swap error: {e}"))),
+        };
+        let mut written_pdb = None;
+        if let Some(rel) = args.get("output_pdb").and_then(Value::as_str) {
+            let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+                Ok(p) => p,
+                Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+            };
+            f.write_all(write_pdb(&built.mol).as_bytes())
+                .map_err(|e| e.to_string())?;
+            written_pdb = Some(resolved.display().to_string());
+        }
+        return Ok(tool_ok(
+            format!(
+                "NRPS swap Mod {} ({} -> {}): ΔMW {:+.2}, risk={}",
+                ev.module_index, ev.old_monomer, ev.new_monomer, ev.delta_mw, ev.interface_risk
+            ),
+            json!({ "swap": ev, "written_pdb": written_pdb }),
+        ));
+    }
+
+    let (rep, built) = match mol_peptide::compile_nrps_bgc(&bgc, &cat) {
+        Ok(x) => x,
+        Err(e) => return Ok(tool_err(format!("NRPS compile error: {e}"))),
+    };
+    let mut written_md = None;
+    let mut written_pdb = None;
+    if let Some(rel) = args.get("output_md").and_then(Value::as_str) {
+        let md = mol_peptide::render_nrps_markdown(&rep);
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(md.as_bytes()).map_err(|e| e.to_string())?;
+        written_md = Some(resolved.display().to_string());
+    }
+    if let Some(rel) = args.get("output_pdb").and_then(Value::as_str) {
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(write_pdb(&built.mol).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_pdb = Some(resolved.display().to_string());
+    }
+
+    Ok(tool_ok(
+        format!(
+            "Compiled NRPS BGC {} -> {} ({:.4} Da, collinear={})",
+            rep.bgc.name, rep.formula, rep.monoisotopic_mass, rep.collinear_compatible
+        ),
+        json!({
+            "report": rep,
+            "written_md": written_md,
+            "written_pdb": written_pdb,
+        }),
+    ))
+}
+
+fn tool_generate_peptide_scan(args: &Value, sandbox: &PathSandbox) -> Result<Value, String> {
+    let spec_str = args
+        .get("spec")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "missing required 'spec'".to_string())?;
+    let mode_s = args.get("mode").and_then(Value::as_str).unwrap_or("nme");
+    let mode = mol_peptide::ScanMode::from_str_lossy(mode_s)
+        .ok_or_else(|| format!("unknown scan mode '{mode_s}'"))?;
+    let cat = mol_peptide::default_monomer_catalog();
+    let parsed = match mol_peptide::parse_peptide_spec(
+        spec_str,
+        &cat,
+        mol_peptide::PeptideConformation::BetaStrand,
+    ) {
+        Ok(p) => p,
+        Err(e) => return Ok(tool_err(format!("invalid peptide/NRP spec: {e}"))),
+    };
+    let bundle = match mol_peptide::run_peptide_scan(&parsed, mode, &cat) {
+        Ok(b) => b,
+        Err(e) => return Ok(tool_err(format!("scan error: {e}"))),
+    };
+
+    let mut written_csv = None;
+    let mut written_sdf3d = None;
+    if let Some(rel) = args.get("output_csv").and_then(Value::as_str) {
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(mol_peptide::render_scan_csv(&bundle).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_csv = Some(resolved.display().to_string());
+    }
+    if let Some(rel) = args.get("output_sdf3d").and_then(Value::as_str) {
+        let refs: Vec<&MolGraph> = bundle.built_mols.iter().map(|b| &b.mol).collect();
+        let (resolved, mut f) = match sandbox.open_write(Path::new(rel)) {
+            Ok(p) => p,
+            Err(e) => return Ok(tool_err(format!("write sandbox error: {e}"))),
+        };
+        f.write_all(write_sdf_v2000_3d(&refs).as_bytes())
+            .map_err(|e| e.to_string())?;
+        written_sdf3d = Some(resolved.display().to_string());
+    }
+
+    Ok(tool_ok(
+        format!(
+            "Generated {} peptide variants ({})",
+            bundle.variants.len(),
+            bundle.mode.label()
+        ),
+        json!({
+            "mode": bundle.mode.label(),
+            "parent": bundle.parent,
+            "variant_count": bundle.variants.len(),
+            "variants": bundle.variants,
+            "written_csv": written_csv,
+            "written_sdf3d": written_sdf3d,
+        }),
+    ))
 }

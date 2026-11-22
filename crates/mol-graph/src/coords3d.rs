@@ -1014,12 +1014,9 @@ enum ChiralRestraint {
     },
 }
 
-pub(crate) fn relax_3d_coords_pinned(
-    mol: &MolGraph,
-    pts: &mut [[f64; 3]],
-    pinned: &[bool],
-    iters: usize,
-) {
+/// Coordinate-relaxation solver keeping `pinned[i] == true` atoms fixed while relaxing bond
+/// lengths, angles, planarity, chiral volumes, E/Z geometry, and nonbonded clashes.
+pub fn relax_3d_coords_pinned(mol: &MolGraph, pts: &mut [[f64; 3]], pinned: &[bool], iters: usize) {
     let n = mol.atoms.len();
     if n < 2 {
         return;
@@ -1493,8 +1490,42 @@ pub fn write_pdb(mol: &MolGraph) -> String {
     if let Some(ss) = mol.properties.get("SECONDARY_STRUCTURE") {
         let _ = writeln!(out, "REMARK   2 SECONDARY STRUCTURE: {ss}");
     }
+    if let Some(helm) = mol.properties.get("PEPTIDE_HELM") {
+        let _ = writeln!(out, "REMARK   3 HELM: {helm}");
+    }
 
     let coords = compute_3d_coords(mol);
+
+    // Emit standard PDB SSBOND records for covalent S-S disulfide bridges between residues.
+    let mut ss_serial = 0usize;
+    for b in &mol.bonds {
+        let au = &mol.atoms[b.u];
+        let av = &mol.atoms[b.v];
+        if au.symbol == "S"
+            && av.symbol == "S"
+            && let (Some(mu), Some(mv)) = (&au.pdb_meta, &av.pdb_meta)
+        {
+            ss_serial += 1;
+            let pu = coords[b.u];
+            let pv = coords[b.v];
+            let dist =
+                ((pu[0] - pv[0]).powi(2) + (pu[1] - pv[1]).powi(2) + (pu[2] - pv[2]).powi(2))
+                    .sqrt();
+            let _ = writeln!(
+                out,
+                "SSBOND {:>3} {:>3.3} {} {:>4}    {:>3.3} {} {:>4}                       1555   1555 {:>5.2}",
+                ss_serial,
+                mu.res_name,
+                mu.chain,
+                mu.res_seq,
+                mv.res_name,
+                mv.chain,
+                mv.res_seq,
+                dist
+            );
+        }
+    }
+
     let mut elem_counts: HashMap<&str, usize> = HashMap::new();
     let mut any_polymer = false;
 
@@ -1750,8 +1781,8 @@ pub fn write_sdf_v2000_3d(mols: &[&MolGraph]) -> String {
     out
 }
 
-/// Quick helper used by rotation helpers from peptide module as well.
-pub(crate) fn place_nerf_atom(
+/// Quick NeRF atom placement helper shared with peptide and macrocycle builders.
+pub fn place_nerf_atom(
     p_a: [f64; 3],
     p_b: [f64; 3],
     p_c: [f64; 3],
