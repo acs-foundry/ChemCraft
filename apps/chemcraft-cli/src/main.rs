@@ -429,6 +429,23 @@ enum SubCmd {
         #[arg(long)]
         module: Option<String>,
     },
+    /// Export a 2D ACS-1996 chemical/NRP publication bundle (PNG + WordCraft .docx + DeckCraft .pptx + GridCraft .xlsx) and optionally live-push over Craft Link v1.
+    ExportArtcraft {
+        #[arg(long)]
+        smiles: Option<String>,
+        #[arg(long)]
+        nrp: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long, default_value = "wordcraft")]
+        target: String,
+        #[arg(long)]
+        out_dir: PathBuf,
+        #[arg(long)]
+        push_live: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Start the hardened MCP server (stdio or TCP with token + sandbox).
     Mcp {
         #[arg(long)]
@@ -1030,6 +1047,149 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 module.as_deref(),
             )?;
             println!("Craft Link v1 → BiomolCraft: {reply}");
+        }
+        SubCmd::ExportArtcraft {
+            smiles,
+            nrp,
+            name,
+            target,
+            out_dir,
+            push_live,
+            json,
+        } => {
+            let (mut mol, title, summary_md, mut rows) = if let Some(spec) = nrp {
+                let cat = default_monomer_catalog();
+                let conf = PeptideConformation::from_str_lossy("ring")
+                    .unwrap_or(PeptideConformation::BetaStrand);
+                let built = build_peptide_or_nrp(&spec, conf, &cat)?;
+                let dev = analyze_peptide_developability(&built, &cat);
+                let spps = plan_spps_vs_nrps(&built.spec, &cat);
+                let mut md = render_developability_markdown(&dev);
+                md.push_str("\n---\n\n");
+                md.push_str(&render_spps_markdown(&spps));
+                let t = name.unwrap_or_else(|| dev.name.clone());
+                let r = vec![
+                    ("Compound", t.clone()),
+                    ("Formula", dev.formula.clone()),
+                    (
+                        "Monoisotopic Mass (Da)",
+                        format!("{:.4}", dev.monoisotopic_mass),
+                    ),
+                    ("Average MW (Da)", format!("{:.2}", dev.average_mw)),
+                    (
+                        "WLOGP / TPSA",
+                        format!("{:.2} / {:.1} Å²", dev.wlogp, dev.tpsa),
+                    ),
+                    ("bRo5 Oral Score", format!("{:.3}", dev.bro5_oral_score)),
+                    ("Oral Verdict", dev.bro5_verdict.clone()),
+                    ("HELM", built.helm.clone()),
+                ];
+                (built.mol, t, md, r)
+            } else if let Some(smi) = smiles {
+                let mut m = parse_smiles(&smi)?;
+                let t = name.unwrap_or_else(|| {
+                    m.name
+                        .clone()
+                        .unwrap_or_else(|| "ChemCraft Compound".to_string())
+                });
+                m.name = Some(t.clone());
+                let canon = m.canonical_smiles();
+                let an = analyze_molecule(&m);
+                let md = format!(
+                    "## ChemCraft Structural Profile — {t}\n\n- **Canonical SMILES:** `{canon}`\n- **Formula:** `{}`\n- **MW:** `{:.2} Da` | **Exact Mass:** `{:.4} Da` | **DBE:** `{:.1}`\n- **Heavy Atoms:** `{}` | **Rings:** `{}` | **Chiral Centers:** `{}`\n- **Elemental Analysis:** `{}`\n",
+                    an.formula,
+                    an.molecular_weight,
+                    an.exact_mass,
+                    an.dbe,
+                    an.heavy_atoms,
+                    an.ring_count,
+                    an.chiral_centers,
+                    an.elemental_analysis_string
+                );
+                let r = vec![
+                    ("Compound", t.clone()),
+                    ("Canonical SMILES", canon),
+                    ("Formula", an.formula),
+                    ("MW (Da)", format!("{:.2}", an.molecular_weight)),
+                    ("Exact Mass (Da)", format!("{:.4}", an.exact_mass)),
+                    ("DBE", format!("{:.1}", an.dbe)),
+                    (
+                        "Heavy Atoms / Rings",
+                        format!("{} / {}", an.heavy_atoms, an.ring_count),
+                    ),
+                    ("Chiral Centers", an.chiral_centers.to_string()),
+                ];
+                (m, t, md, r)
+            } else {
+                return Err("provide --smiles <SMILES> or --nrp <SPEC|PRESET>".into());
+            };
+            generate_2d_coords(&mut mol);
+            let style =
+                SceneStyle::from_preset(DepictionPreset::Acs1996Color, 1200.0, 900.0, false);
+            let scene = build_mol_scene(&mol, &style, &[]);
+            let png_bytes = scene_to_png_bytes(&scene, 2.0)?;
+            rows.push((
+                "Generator",
+                format!("ChemCraft v{}", env!("CARGO_PKG_VERSION")),
+            ));
+            let sum = craftbio_report::export_artcraft_bundle(
+                &title,
+                &png_bytes,
+                &rows,
+                &summary_md,
+                &out_dir,
+            )
+            .map_err(|e| format!("ArtCraft export failed: {e}"))?;
+
+            let mut push_res = None;
+            if push_live {
+                let tgt = craftbio_scene::ArtCraftTarget::parse(&target).ok_or_else(|| {
+                    format!(
+                        "unknown ArtCraft target '{target}' (use wordcraft|deckcraft|gridcraft)"
+                    )
+                })?;
+                let md_path = match tgt {
+                    craftbio_scene::ArtCraftTarget::DeckCraft => sum.deckcraft_slides_md.clone(),
+                    _ => sum.wordcraft_md.clone(),
+                };
+                let native_doc = match tgt {
+                    craftbio_scene::ArtCraftTarget::WordCraft => sum.wordcraft_docx.clone(),
+                    craftbio_scene::ArtCraftTarget::DeckCraft => sum.deckcraft_pptx.clone(),
+                    craftbio_scene::ArtCraftTarget::GridCraft => sum.gridcraft_xlsx.clone(),
+                };
+                let payload = craftbio_scene::ArtCraftPushPayload {
+                    target: tgt,
+                    title: title.clone(),
+                    source_app: "chemcraft".to_string(),
+                    bundle_dir: sum.out_dir.clone(),
+                    figure_png_path: sum.figure_png.clone(),
+                    markdown_path: md_path,
+                    table_tsv_path: sum.gridcraft_tsv.clone(),
+                    native_doc_path: native_doc,
+                    summary_markdown: summary_md,
+                };
+                push_res = Some(craftbio_scene::push_to_artcraft_via_craft_link(
+                    None, &payload,
+                )?);
+            }
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "bundle": sum,
+                        "push": push_res,
+                    }))?
+                );
+            } else {
+                println!(
+                    "Exported ChemCraft ArtCraft bundle -> {} (DOCX={:?}, PPTX={:?}, XLSX={:?})",
+                    sum.out_dir, sum.wordcraft_docx, sum.deckcraft_pptx, sum.gridcraft_xlsx
+                );
+                if let Some(pr) = push_res {
+                    println!("{}", pr.message);
+                }
+            }
         }
     }
     Ok(())

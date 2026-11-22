@@ -10,7 +10,8 @@ workspace = true
 
 [dependencies]
 clap.workspace = true
-craftbio-scene = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v0.2.0" }
+craftbio-scene = { workspace = true }
+craftbio-report = { workspace = true }
 mol-admet-bridge = { path = "../../crates/mol-admet-bridge" }
 mol-engine = { path = "../../crates/mol-engine" }
 mol-graph = { path = "../../crates/mol-graph" }

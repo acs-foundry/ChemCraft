@@ -10,10 +10,11 @@ members = [
     "crates/mol-engine",
     "apps/chemcraft-cli",
     "apps/chemcraft",
+    "xtask",
 ]
 
 [workspace.package]
-version = "0.4.1"
+version = "1.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -40,6 +41,8 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 png = "0.18"
 eframe = "0.31"
 egui = "0.31"
+craftbio-scene = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.0" }
+craftbio-report = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.0" }
 
 [profile.release]
 overflow-checks = true
