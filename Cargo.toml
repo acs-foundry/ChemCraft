@@ -41,8 +41,8 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "si
 png = "0.18"
 eframe = "0.31"
 egui = "0.31"
-craftbio-scene = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.1" }
-craftbio-report = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.1" }
+craftbio-scene = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.2" }
+craftbio-report = { git = "https://github.com/acs-foundry/craftbio-libs", tag = "v1.1.2" }
 
 [profile.release]
 overflow-checks = true
