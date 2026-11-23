@@ -893,6 +893,15 @@ pub fn parse_helm(
     if raw_monomers.is_empty() {
         return Err(PeptideError::EmptyInput);
     }
+    // Enforce the cap here, on the raw monomer list, before anything is built. The other
+    // parsing path checked it and this one did not, so HELM was a way around it: 60 kB of
+    // notation expanded into a polymer large enough to exhaust several GiB.
+    if raw_monomers.len() > MAX_NRP_RESIDUES {
+        return Err(PeptideError::Notation(format!(
+            "HELM residue count {} exceeds limit of {MAX_NRP_RESIDUES}",
+            raw_monomers.len()
+        )));
+    }
 
     let mut n_cap = "H".to_string();
     let mut c_cap = CCapKind::FreeAcid;
@@ -1115,4 +1124,53 @@ fn validate_cross_links(residues: &[ResidueUnit], links: &[CrossLink]) -> Result
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod residue_cap_tests {
+    use super::*;
+
+    fn catalog() -> MonomerCatalog {
+        MonomerCatalog::builtin()
+    }
+
+    /// Audit finding F3-17: `MAX_NRP_RESIDUES` was enforced on one parsing path and not on
+    /// `parse_helm`, so HELM notation walked straight past it. A 5000-residue polymer was
+    /// accepted and built; 30 000 residues (60 kB of input) exhausted a 6 GiB budget.
+    #[test]
+    fn helm_notation_obeys_the_residue_cap() {
+        let cat = catalog();
+        let huge = format!(
+            "PEPTIDE1{{{}}}$$$$",
+            vec!["A"; MAX_NRP_RESIDUES + 1].join(".")
+        );
+        let res = parse_helm(&huge, &cat, PeptideConformation::default());
+        assert!(
+            res.is_err(),
+            "a {}-residue HELM polymer must be refused (cap {MAX_NRP_RESIDUES})",
+            MAX_NRP_RESIDUES + 1
+        );
+
+        let massive = format!("PEPTIDE1{{{}}}$$$$", vec!["A"; 5_000].join("."));
+        assert!(
+            parse_helm(&massive, &cat, PeptideConformation::default()).is_err(),
+            "5000 residues must be refused, not built"
+        );
+    }
+
+    /// ...while a polymer inside the cap still parses, including the N/C cap forms.
+    #[test]
+    fn helm_within_the_cap_still_parses() {
+        let cat = catalog();
+        let ok = format!("PEPTIDE1{{{}}}$$$$", vec!["A"; MAX_NRP_RESIDUES].join("."));
+        let spec = parse_helm(&ok, &cat, PeptideConformation::default());
+        assert!(
+            spec.is_ok(),
+            "exactly {MAX_NRP_RESIDUES} residues must still be accepted: {:?}",
+            spec.err()
+        );
+
+        let short = parse_helm("PEPTIDE1{A.G.V}$$$$", &cat, PeptideConformation::default());
+        assert!(short.is_ok(), "{:?}", short.err());
+    }
 }

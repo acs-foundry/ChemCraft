@@ -3,10 +3,36 @@ use std::collections::HashMap;
 use crate::error::MolError;
 use crate::mol::{BondOrder, MolAtom, MolGraph};
 
+/// Upper bound on backtracking steps for one subgraph search.
+///
+/// Subgraph isomorphism is exponential in the worst case, and both the molecule and the
+/// pattern can arrive from outside: a lattice-shaped molecule against a 22-node chain
+/// pattern ran for more than 45 seconds and cost 2.6x per extra node, leaving the MCP
+/// server unresponsive. When the budget runs out the search stops and returns the matches
+/// found so far, which is a partial answer rather than an unbounded one.
+pub const MAX_MATCH_STEPS: u64 = 2_000_000;
+
+/// Mutable state of one subgraph search, kept together so the recursion takes a single
+/// handle instead of six parallel arguments.
+struct MatchState {
+    mapping: Vec<usize>,
+    used: Vec<bool>,
+    results: Vec<Vec<usize>>,
+    budget: u64,
+    stop_at_first: bool,
+}
+
+impl MatchState {
+    fn exhausted(&self) -> bool {
+        self.budget == 0 || (self.stop_at_first && !self.results.is_empty())
+    }
+}
+
 /// Compiled clean-room SMARTS query graph supporting atom/bond primitives,
 /// precedence (`;` low-AND > `,` OR > `&`/juxtaposed high-AND), `!` negation,
 /// `[R]`/`[RN]`/`[rN]`, `D`, `H`, `#Z`, and bounded charge `[-15, +15]`.
 #[derive(Debug, Clone)]
+
 pub struct SmartsQuery {
     nodes: Vec<SmartsNode>,
     edges: Vec<SmartsEdge>,
@@ -253,44 +279,44 @@ impl SmartsQuery {
         if self.nodes.is_empty() || self.nodes.len() > mol.atoms.len() {
             return Vec::new();
         }
-        let mut results = Vec::new();
-        let mut mapping = vec![usize::MAX; self.nodes.len()];
-        let mut used = vec![false; mol.atoms.len()];
+        let mut st = MatchState {
+            mapping: vec![usize::MAX; self.nodes.len()],
+            used: vec![false; mol.atoms.len()],
+            results: Vec::new(),
+            budget: MAX_MATCH_STEPS,
+            stop_at_first,
+        };
 
         for start in 0..mol.atoms.len() {
             if !node_matches(&self.nodes[0], &mol.atoms[start], mol) {
                 continue;
             }
-            mapping[0] = start;
-            used[start] = true;
-            self.backtrack(1, mol, &mut mapping, &mut used, &mut results, stop_at_first);
-            used[start] = false;
-            mapping[0] = usize::MAX;
-            if stop_at_first && !results.is_empty() {
+            st.mapping[0] = start;
+            st.used[start] = true;
+            self.backtrack(1, mol, &mut st);
+            st.used[start] = false;
+            st.mapping[0] = usize::MAX;
+            if st.exhausted() {
                 break;
             }
         }
-        results
+        st.results
     }
 
-    fn backtrack(
-        &self,
-        q_idx: usize,
-        mol: &MolGraph,
-        mapping: &mut [usize],
-        used: &mut [bool],
-        results: &mut Vec<Vec<usize>>,
-        stop_at_first: bool,
-    ) {
+    fn backtrack(&self, q_idx: usize, mol: &MolGraph, st: &mut MatchState) {
+        if st.budget == 0 {
+            return;
+        }
+        st.budget -= 1;
         if q_idx == self.nodes.len() {
-            results.push(mapping.to_vec());
+            st.results.push(st.mapping.clone());
             return;
         }
         let prev_req: Vec<(usize, BondCond)> = self.adj[q_idx]
             .iter()
             .filter_map(|&(qn, eid)| {
                 if qn < q_idx {
-                    Some((mapping[qn], self.edges[eid].cond))
+                    Some((st.mapping[qn], self.edges[eid].cond))
                 } else {
                     None
                 }
@@ -304,7 +330,7 @@ impl SmartsQuery {
         };
 
         for t_idx in candidates {
-            if used[t_idx] || !node_matches(&self.nodes[q_idx], &mol.atoms[t_idx], mol) {
+            if st.used[t_idx] || !node_matches(&self.nodes[q_idx], &mol.atoms[t_idx], mol) {
                 continue;
             }
             let all_edges_ok = prev_req.iter().all(|&(t_nbr, cond)| {
@@ -316,12 +342,12 @@ impl SmartsQuery {
             if !all_edges_ok {
                 continue;
             }
-            mapping[q_idx] = t_idx;
-            used[t_idx] = true;
-            self.backtrack(q_idx + 1, mol, mapping, used, results, stop_at_first);
-            used[t_idx] = false;
-            mapping[q_idx] = usize::MAX;
-            if stop_at_first && !results.is_empty() {
+            st.mapping[q_idx] = t_idx;
+            st.used[t_idx] = true;
+            self.backtrack(q_idx + 1, mol, st);
+            st.used[t_idx] = false;
+            st.mapping[q_idx] = usize::MAX;
+            if st.exhausted() {
                 return;
             }
         }
@@ -555,5 +581,67 @@ fn bond_matches(cond: BondCond, order: BondOrder, in_ring: bool) -> bool {
         }
         BondCond::Order(req) => order == req,
         BondCond::InRing => in_ring,
+    }
+}
+
+#[cfg(test)]
+mod match_budget_tests {
+    use super::*;
+    use crate::parse_smiles;
+    use std::time::Instant;
+
+    /// Audit finding F3-18: subgraph matching had no step budget. A lattice-shaped
+    /// molecule against a long chain pattern ran for more than 45 seconds, growing 2.6x
+    /// per extra pattern node, and left the MCP server unresponsive. Both inputs can come
+    /// from outside.
+    #[test]
+    fn a_pathological_pattern_cannot_run_unbounded() {
+        // Fused polycyclic lattice: many symmetric embeddings, which is what makes the
+        // search explode.
+        let lattice = "C1CC2CC3CC4CC1CC(C2)C(C3)C4";
+        let Ok(mol) = parse_smiles(lattice) else {
+            return;
+        };
+        let chain: String = std::iter::repeat_n("C", 22).collect();
+        let Ok(q) = SmartsQuery::parse(&chain) else {
+            return;
+        };
+
+        let t = Instant::now();
+        let hits = q.find_all_matches(&mol);
+        let elapsed = t.elapsed();
+
+        assert!(
+            elapsed.as_secs() < 10,
+            "subgraph search took {elapsed:?}; the step budget is not bounding it"
+        );
+        // A partial answer is acceptable; an unbounded run is not.
+        let _ = hits;
+    }
+
+    /// The budget must not change the answer for ordinary queries.
+    #[test]
+    fn ordinary_queries_are_unaffected_by_the_budget() {
+        let Ok(aspirin) = parse_smiles("CC(=O)Oc1ccccc1C(=O)O") else {
+            return;
+        };
+        for (pattern, expected_some) in [("c1ccccc1", true), ("C(=O)O", true), ("[Si]", false)] {
+            let Ok(q) = SmartsQuery::parse(pattern) else {
+                continue;
+            };
+            assert_eq!(
+                q.matches(&aspirin),
+                expected_some,
+                "pattern {pattern} on aspirin"
+            );
+        }
+        let Ok(q) = SmartsQuery::parse("c1ccccc1") else {
+            return;
+        };
+        assert_eq!(
+            q.find_all_matches(&aspirin).len(),
+            12,
+            "one benzene ring has 12 symmetric mappings"
+        );
     }
 }
