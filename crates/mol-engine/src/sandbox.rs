@@ -355,3 +355,188 @@ fn normalize_lexical(path: &Path) -> PathBuf {
     }
     out
 }
+
+#[cfg(test)]
+mod confinement_tests {
+    use super::*;
+    use std::fs;
+
+    struct Fixture {
+        base: std::path::PathBuf,
+        root: std::path::PathBuf,
+        outside: std::path::PathBuf,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    fn fixture(tag: &str) -> Option<Fixture> {
+        let base = std::env::temp_dir().join(format!("sbx_conf_{}_{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir_all(root.join("sub")).ok()?;
+        fs::create_dir_all(&outside).ok()?;
+        fs::write(root.join("ok.txt"), "inside\n").ok()?;
+        fs::write(root.join("sub/ok.txt"), "inside sub\n").ok()?;
+        fs::write(outside.join("secret.txt"), "SECRET\n").ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let _ = symlink(outside.join("secret.txt"), root.join("link_out"));
+            let _ = symlink(root.join("ok.txt"), root.join("link_in"));
+        }
+        Some(Fixture {
+            base,
+            root,
+            outside,
+        })
+    }
+
+    /// The confinement contract, pinned case by case.
+    ///
+    /// This crate carries its own copy of the path sandbox, and so do two sibling repositories in
+    /// the suite. The copies behave identically today — that was measured across every case below
+    /// — but nothing keeps them that way, and a copy that quietly starts accepting one of these is
+    /// a sandbox escape.
+    ///
+    /// Verified by mutation, and the result is worth recording: the sandbox confines twice, with
+    /// the path normalisation and with `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)`. Removing
+    /// **either one alone** changes nothing a caller can observe — the other still refuses every
+    /// case here. Only with both removed do these tests fail. That is defence in depth working as
+    /// intended, and it is also why a reviewer must not read "the test passes" as evidence that
+    /// both layers are intact.
+    #[test]
+    fn the_sandbox_accepts_only_what_is_inside_its_roots() {
+        let Some(fx) = fixture("accept") else {
+            return;
+        };
+        let Ok(sbx) = PathSandbox::new(Some(&fx.root), Some(&fx.root)) else {
+            return;
+        };
+        let outside_abs = fx.outside.join("secret.txt").display().to_string();
+        let inside_abs = fx.root.join("ok.txt").display().to_string();
+
+        // (candidate, must be rejected, why)
+        let cases: Vec<(&str, bool, &str)> = vec![
+            ("ok.txt", false, "a plain file inside the root"),
+            ("sub/ok.txt", false, "a file in a subdirectory"),
+            (&inside_abs, false, "an absolute path that is still inside"),
+            ("../secret.txt", true, "the simplest traversal"),
+            (
+                "../../../../etc/passwd",
+                true,
+                "traversal past the filesystem root",
+            ),
+            (
+                "sub/../../secret.txt",
+                true,
+                "traversal that re-enters before leaving",
+            ),
+            (&outside_abs, true, "an absolute path outside the root"),
+            (
+                "link_out",
+                true,
+                "a symlink pointing outside: RESOLVE_NO_SYMLINKS",
+            ),
+            (
+                "link_in",
+                true,
+                "even a symlink that stays inside is refused",
+            ),
+            ("/dev/zero", true, "a character device"),
+            ("", true, "the empty path"),
+            (".", true, "the root itself is not a file"),
+            ("ok\0.txt", true, "an interior NUL byte"),
+        ];
+
+        for (candidate, must_reject, why) in cases {
+            let got = sbx.read_to_string_limited(std::path::Path::new(candidate), MAX_READ_BYTES);
+            match got {
+                Ok((_, content)) => {
+                    assert!(
+                        !must_reject,
+                        "sandbox accepted {candidate:?} ({why}); it must be rejected"
+                    );
+                    assert!(
+                        !content.contains("SECRET"),
+                        "sandbox leaked content from outside its root via {candidate:?}"
+                    );
+                }
+                Err(_) => assert!(
+                    must_reject,
+                    "sandbox rejected {candidate:?} ({why}); it must be accepted"
+                ),
+            }
+        }
+    }
+
+    /// Writes are confined by the same contract as reads.
+    ///
+    /// The check is "nothing new exists outside the root", not "one guessed path is absent":
+    /// a traversal lands wherever the join resolves to, which is rarely the path you first
+    /// think of. Verified by mutation: removing the path validation from `open_write` makes
+    /// this test fail.
+    #[test]
+    fn the_sandbox_refuses_to_write_outside_its_root() {
+        let Some(fx) = fixture("write") else {
+            return;
+        };
+        let Ok(sbx) = PathSandbox::new(Some(&fx.root), Some(&fx.root)) else {
+            return;
+        };
+
+        fn snapshot(dir: &std::path::Path) -> Vec<String> {
+            let mut out = Vec::new();
+            let Ok(rd) = fs::read_dir(dir) else {
+                return out;
+            };
+            for e in rd.flatten() {
+                let p = e.path();
+                out.push(p.display().to_string());
+                if p.is_dir() && p.file_name().is_some_and(|n| n != "root") {
+                    out.extend(snapshot(&p));
+                }
+            }
+            out.sort();
+            out
+        }
+
+        let before = snapshot(&fx.base);
+        let probe = std::path::Path::new("/tmp/chemcraft_sbx_probe.txt");
+        let _ = fs::remove_file(probe);
+
+        for candidate in [
+            "../written.txt".to_string(),
+            "../../written.txt".to_string(),
+            "sub/../../written.txt".to_string(),
+            fx.outside.join("written.txt").display().to_string(),
+            probe.display().to_string(),
+            "link_out".to_string(),
+        ] {
+            let _ = sbx.open_write(std::path::Path::new(&candidate));
+        }
+
+        let after = snapshot(&fx.base);
+        assert_eq!(
+            before, after,
+            "a write escaped the sandbox root: something new appeared outside it"
+        );
+        assert!(
+            !probe.exists(),
+            "a write escaped to an absolute path outside the root"
+        );
+        // The symlink target must not have been written through either.
+        let secret = fs::read_to_string(fx.outside.join("secret.txt")).unwrap_or_default();
+        assert_eq!(
+            secret, "SECRET\n",
+            "a write followed a symlink out of the root"
+        );
+
+        // ...and an honest write still works.
+        assert!(sbx.open_write(std::path::Path::new("out.txt")).is_ok());
+    }
+}
