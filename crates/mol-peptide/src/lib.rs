@@ -52,9 +52,25 @@ pub use spps_and_scan::{
 #[must_use]
 pub fn default_monomer_catalog() -> MonomerCatalog {
     let mut cat = MonomerCatalog::builtin();
-    let data_dir =
-        std::env::var("CRAFT_DATA_DIR").unwrap_or_else(|_| "/home/acs/Datos/CraftBio".to_string());
-    let custom_dir = std::path::PathBuf::from(data_dir).join("monomers");
+    // `CRAFT_DATA_DIR`, else the XDG data directory. Never a path hardcoded for one machine.
+    let data_dir = std::env::var("CRAFT_DATA_DIR")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var("XDG_DATA_HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|x| std::path::PathBuf::from(x).join("CraftBio"))
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .map(|h| std::path::PathBuf::from(h).join(".local/share/CraftBio"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("CraftBio"));
+    let custom_dir = data_dir.join("monomers");
     cat.load_custom_dir(&custom_dir);
     cat
 }
