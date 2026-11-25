@@ -741,4 +741,41 @@ $$$$
         assert_eq!(resolve_chemical_name("hexanoic acid")?.formula(), "C6H12O2");
         Ok(())
     }
+
+    #[test]
+    fn baricitinib_3d_sulfonamide_oxygens_are_tetrahedral_not_collinear() -> Result<(), MolError> {
+        let bari = parse_smiles("CCS(=O)(=O)N1CC(C1)(CC#N)n2cc(cn2)c3ncnc4c3cc[nH]4")?;
+        let coords = compute_3d_coords(&bari);
+        let s_idx = bari
+            .atoms
+            .iter()
+            .position(|a| a.symbol == "S")
+            .ok_or(MolError::EmptyInput)?;
+        let oxy: Vec<usize> = bari.adj[s_idx]
+            .iter()
+            .map(|&(nb, _)| nb)
+            .filter(|&nb| bari.atoms[nb].symbol == "O")
+            .collect();
+        assert_eq!(oxy.len(), 2, "Baricitinib sulfonamide must have 2 oxygens");
+        let ps = coords[s_idx];
+        let p1 = coords[oxy[0]];
+        let p2 = coords[oxy[1]];
+        let oo = ((p1[0] - p2[0]).powi(2) + (p1[1] - p2[1]).powi(2) + (p1[2] - p2[2]).powi(2))
+            .sqrt();
+        assert!(
+            oo > 2.20,
+            "Sulfonamide O=S=O oxygens collapsed (d={oo:.3} Å)"
+        );
+        let v1 = [p1[0] - ps[0], p1[1] - ps[1], p1[2] - ps[2]];
+        let v2 = [p2[0] - ps[0], p2[1] - ps[1], p2[2] - ps[2]];
+        let l1 = (v1[0] * v1[0] + v1[1] * v1[1] + v1[2] * v1[2]).sqrt();
+        let l2 = (v2[0] * v2[0] + v2[1] * v2[1] + v2[2] * v2[2]).sqrt();
+        let cos_a = ((v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2]) / (l1 * l2)).clamp(-1.0, 1.0);
+        let ang_deg = cos_a.acos().to_degrees();
+        assert!(
+            (100.0..=135.0).contains(&ang_deg),
+            "Sulfonamide O-S-O angle out of tetrahedral range: {ang_deg:.1}°"
+        );
+        Ok(())
+    }
 }

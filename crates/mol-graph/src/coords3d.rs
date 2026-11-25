@@ -80,6 +80,11 @@ pub fn generate_3d_coords(mol: &mut MolGraph) {
 }
 
 fn atom_is_sp(mol: &MolGraph, i: usize) -> bool {
+    // Hypervalent sulfur (sulfone/sulfonamide/sulfate: S(=O)(=O)...) & phosphorus (P(=O)...)
+    // with >= 3 neighbors are tetrahedral/pyramidal, never linear sp!
+    if matches!(mol.atoms[i].symbol.as_str(), "S" | "P") && mol.adj[i].len() >= 3 {
+        return false;
+    }
     mol.adj[i]
         .iter()
         .any(|&(_, bid)| mol.bonds[bid].order == BondOrder::Triple)

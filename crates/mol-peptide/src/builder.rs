@@ -135,6 +135,322 @@ fn delete_atoms_remap(mol: &mut MolGraph, to_delete: &BTreeSet<usize>) -> Vec<Op
     remap
 }
 
+/// Assign exact PDB IUPAC sidechain heavy-atom names for all 20 canonical amino acids
+/// so exported PDBs pass structural validation (BiomolCraft `info`, MolProbity, ChimeraX)
+/// without false truncated-sidechain alerts.
+#[allow(clippy::too_many_arguments)]
+fn assign_iupac_sidechain_names(
+    mol: &mut MolGraph,
+    pdb_code: &str,
+    n_id: usize,
+    ca_id: usize,
+    c_id: usize,
+    o_id: Option<usize>,
+    oxt_id: usize,
+) {
+    let set_name = |m: &mut MolGraph, aid: usize, name: &str| {
+        if let Some(meta) = m.atoms.get_mut(aid).and_then(|a| a.pdb_meta.as_mut()) {
+            meta.atom_name = name.to_string();
+        }
+    };
+    let is_backbone = |aid: usize| {
+        aid == n_id || aid == ca_id || aid == c_id || aid == oxt_id || o_id == Some(aid)
+    };
+    let sc_nbrs = |m: &MolGraph, u: usize, exclude: &[usize]| -> Vec<usize> {
+        m.adj[u]
+            .iter()
+            .map(|&(nb, _)| nb)
+            .filter(|&nb| !is_backbone(nb) && !exclude.contains(&nb))
+            .collect()
+    };
+
+    let cb_list = sc_nbrs(mol, ca_id, &[]);
+    let Some(&cb) = cb_list.first() else {
+        return;
+    };
+
+    match pdb_code {
+        "ALA" => set_name(mol, cb, "CB"),
+        "SER" => {
+            set_name(mol, cb, "CB");
+            if let Some(&og) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, og, "OG");
+            }
+        }
+        "CYS" => {
+            set_name(mol, cb, "CB");
+            if let Some(&sg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, sg, "SG");
+            }
+        }
+        "THR" => {
+            set_name(mol, cb, "CB");
+            for nb in sc_nbrs(mol, cb, &[]) {
+                if mol.atoms[nb].symbol == "O" {
+                    set_name(mol, nb, "OG1");
+                } else {
+                    set_name(mol, nb, "CG2");
+                }
+            }
+        }
+        "VAL" => {
+            set_name(mol, cb, "CB");
+            let gs = sc_nbrs(mol, cb, &[]);
+            if let Some(&g1) = gs.first() {
+                set_name(mol, g1, "CG1");
+            }
+            if let Some(&g2) = gs.get(1) {
+                set_name(mol, g2, "CG2");
+            }
+        }
+        "LEU" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                let ds = sc_nbrs(mol, cg, &[cb]);
+                if let Some(&d1) = ds.first() {
+                    set_name(mol, d1, "CD1");
+                }
+                if let Some(&d2) = ds.get(1) {
+                    set_name(mol, d2, "CD2");
+                }
+            }
+        }
+        "ILE" => {
+            set_name(mol, cb, "CB");
+            for nb in sc_nbrs(mol, cb, &[]) {
+                let next = sc_nbrs(mol, nb, &[cb]);
+                if let Some(&cd1) = next.first() {
+                    set_name(mol, nb, "CG1");
+                    set_name(mol, cd1, "CD1");
+                } else {
+                    set_name(mol, nb, "CG2");
+                }
+            }
+        }
+        "MET" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&sd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, sd, "SD");
+                    if let Some(&ce) = sc_nbrs(mol, sd, &[cg]).first() {
+                        set_name(mol, ce, "CE");
+                    }
+                }
+            }
+        }
+        "PRO" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&cd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, cd, "CD");
+                }
+            }
+        }
+        "ASP" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                let mut os = sc_nbrs(mol, cg, &[cb]);
+                os.sort_by_key(|&o| {
+                    let is_dbl = mol.adj[cg]
+                        .iter()
+                        .any(|&(nb, bid)| nb == o && mol.bonds[bid].order == BondOrder::Double);
+                    if is_dbl { 0u8 } else { 1u8 }
+                });
+                if let Some(&o1) = os.first() {
+                    set_name(mol, o1, "OD1");
+                }
+                if let Some(&o2) = os.get(1) {
+                    set_name(mol, o2, "OD2");
+                }
+            }
+        }
+        "ASN" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                for nb in sc_nbrs(mol, cg, &[cb]) {
+                    if mol.atoms[nb].symbol == "O" {
+                        set_name(mol, nb, "OD1");
+                    } else if mol.atoms[nb].symbol == "N" {
+                        set_name(mol, nb, "ND2");
+                    }
+                }
+            }
+        }
+        "GLU" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&cd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, cd, "CD");
+                    let mut os = sc_nbrs(mol, cd, &[cg]);
+                    os.sort_by_key(|&o| {
+                        let is_dbl = mol.adj[cd]
+                            .iter()
+                            .any(|&(nb, bid)| nb == o && mol.bonds[bid].order == BondOrder::Double);
+                        if is_dbl { 0u8 } else { 1u8 }
+                    });
+                    if let Some(&o1) = os.first() {
+                        set_name(mol, o1, "OE1");
+                    }
+                    if let Some(&o2) = os.get(1) {
+                        set_name(mol, o2, "OE2");
+                    }
+                }
+            }
+        }
+        "GLN" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&cd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, cd, "CD");
+                    for nb in sc_nbrs(mol, cd, &[cg]) {
+                        if mol.atoms[nb].symbol == "O" {
+                            set_name(mol, nb, "OE1");
+                        } else if mol.atoms[nb].symbol == "N" {
+                            set_name(mol, nb, "NE2");
+                        }
+                    }
+                }
+            }
+        }
+        "LYS" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&cd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, cd, "CD");
+                    if let Some(&ce) = sc_nbrs(mol, cd, &[cg]).first() {
+                        set_name(mol, ce, "CE");
+                        if let Some(&nz) = sc_nbrs(mol, ce, &[cd]).first() {
+                            set_name(mol, nz, "NZ");
+                        }
+                    }
+                }
+            }
+        }
+        "ARG" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                if let Some(&cd) = sc_nbrs(mol, cg, &[cb]).first() {
+                    set_name(mol, cd, "CD");
+                    if let Some(&ne) = sc_nbrs(mol, cd, &[cg]).first() {
+                        set_name(mol, ne, "NE");
+                        if let Some(&cz) = sc_nbrs(mol, ne, &[cd]).first() {
+                            set_name(mol, cz, "CZ");
+                            let nhs = sc_nbrs(mol, cz, &[ne]);
+                            if let Some(&nh1) = nhs.first() {
+                                set_name(mol, nh1, "NH1");
+                            }
+                            if let Some(&nh2) = nhs.get(1) {
+                                set_name(mol, nh2, "NH2");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "PHE" | "TYR" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                let cds = sc_nbrs(mol, cg, &[cb]);
+                if let (Some(&cd1), Some(&cd2)) = (cds.first(), cds.get(1)) {
+                    set_name(mol, cd1, "CD1");
+                    set_name(mol, cd2, "CD2");
+                    if let Some(&ce1) = sc_nbrs(mol, cd1, &[cg]).first() {
+                        set_name(mol, ce1, "CE1");
+                        if let Some(&ce2) = sc_nbrs(mol, cd2, &[cg]).first() {
+                            set_name(mol, ce2, "CE2");
+                            if let Some(&cz) = sc_nbrs(mol, ce1, &[cd1]).first() {
+                                set_name(mol, cz, "CZ");
+                                if pdb_code == "TYR"
+                                    && let Some(&oh) = sc_nbrs(mol, cz, &[ce1, ce2]).first()
+                                {
+                                    set_name(mol, oh, "OH");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "HIS" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                let mut nd1 = None;
+                let mut cd2 = None;
+                for nb in sc_nbrs(mol, cg, &[cb]) {
+                    if mol.atoms[nb].symbol == "N" {
+                        nd1 = Some(nb);
+                        set_name(mol, nb, "ND1");
+                    } else {
+                        cd2 = Some(nb);
+                        set_name(mol, nb, "CD2");
+                    }
+                }
+                if let Some(n1) = nd1
+                    && let Some(&ce1) = sc_nbrs(mol, n1, &[cg]).first()
+                {
+                    set_name(mol, ce1, "CE1");
+                    if let Some(&ne2) = sc_nbrs(mol, ce1, &[n1]).first() {
+                        set_name(mol, ne2, "NE2");
+                    }
+                } else if let Some(c2) = cd2
+                    && let Some(&ne2) = sc_nbrs(mol, c2, &[cg]).first()
+                {
+                    set_name(mol, ne2, "NE2");
+                }
+            }
+        }
+        "TRP" => {
+            set_name(mol, cb, "CB");
+            if let Some(&cg) = sc_nbrs(mol, cb, &[]).first() {
+                set_name(mol, cg, "CG");
+                let mut cd1 = None;
+                let mut cd2 = None;
+                for nb in sc_nbrs(mol, cg, &[cb]) {
+                    if mol.adj[nb].len() == 2 {
+                        cd1 = Some(nb);
+                        set_name(mol, nb, "CD1");
+                    } else {
+                        cd2 = Some(nb);
+                        set_name(mol, nb, "CD2");
+                    }
+                }
+                if let (Some(d1), Some(d2)) = (cd1, cd2)
+                    && let Some(&ne1) = sc_nbrs(mol, d1, &[cg]).first()
+                {
+                    set_name(mol, ne1, "NE1");
+                    if let Some(&ce2) = sc_nbrs(mol, ne1, &[d1]).first() {
+                        set_name(mol, ce2, "CE2");
+                        if let Some(&ce3) = sc_nbrs(mol, d2, &[cg, ce2]).first() {
+                            set_name(mol, ce3, "CE3");
+                            if let Some(&cz2) = sc_nbrs(mol, ce2, &[ne1, d2]).first() {
+                                set_name(mol, cz2, "CZ2");
+                                if let Some(&cz3) = sc_nbrs(mol, ce3, &[d2]).first() {
+                                    set_name(mol, cz3, "CZ3");
+                                    if let Some(&ch2) = sc_nbrs(mol, cz2, &[ce2]).first() {
+                                        set_name(mol, ch2, "CH2");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Replace old atom `old_nbr` with `new_nbr` inside `target_atom.chiral_seq` (keeps exact R/S after condensation).
 fn patch_chiral_seq(mol: &mut MolGraph, target_atom: usize, old_nbr: usize, new_nbr: usize) {
     if let Some(a) = mol.atoms.get_mut(target_atom) {
@@ -245,6 +561,7 @@ pub fn build_peptide_from_spec(
         {
             m.atom_name = "SG".to_string();
         }
+        assign_iupac_sidechain_names(&mut mol, &mspec.pdb_code, n_id, ca_id, c_id, o_id, oxt_id);
 
         // Apply D-isomer inversion on Cα
         if ru.is_d {

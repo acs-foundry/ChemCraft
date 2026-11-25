@@ -373,4 +373,81 @@ FEATURES             Location/Qualifiers
         assert!(render_scan_csv(&nme_scan).lines().count() == 6);
         Ok(())
     }
+
+    #[test]
+    fn mis1_linear_and_cyclic_have_regular_2d_rings_and_iupac_pdb_names()
+    -> Result<(), PeptideError> {
+        let cat = MonomerCatalog::builtin();
+        // Verify all 20 canonical amino acids emit standard IUPAC PDB heavy-atom names
+        let all20 = build_peptide_or_nrp(
+            "ACDEFGHIKLMNPQRSTVWY",
+            PeptideConformation::BetaStrand,
+            &cat,
+        )?;
+        let pdb20 = write_pdb(&all20.mol);
+        for required in [
+            " CB  ALA",
+            " SG  CYS",
+            " OD2 ASP",
+            " OE2 GLU",
+            " CZ  PHE",
+            " NE2 HIS",
+            " CD1 ILE",
+            " NZ  LYS",
+            " CD2 LEU",
+            " SD  MET",
+            " ND2 ASN",
+            " CD  PRO",
+            " NE2 GLN",
+            " NH2 ARG",
+            " OG  SER",
+            " OG1 THR",
+            " CG2 VAL",
+            " CH2 TRP",
+            " OH  TYR",
+        ] {
+            assert!(
+                pdb20.contains(required),
+                "missing standard IUPAC PDB atom '{required}' in 20-AA export"
+            );
+        }
+
+        // Verify MiS1 linear & cyclic 2D Phe/Tyr/His rings are clean regular polygons (never collapsed triangles)
+        for seq in [
+            "Ac-Asp-Thr-His-Phe-Arg-Thr-Phe-Arg-Ser-His-Ser-Asp-Tyr-Arg-Arg-Ile-NH2",
+            "cyclo(Asp-Thr-His-Phe-Arg-Thr-Phe-Arg-Ser-His-Ser-Asp-Tyr-Arg-Arg-Ile)",
+        ] {
+            let built = build_peptide_or_nrp(seq, PeptideConformation::BetaStrand, &cat)?;
+            assert!(built.mol.warnings.is_empty(), "{:?}", built.mol.warnings);
+            let small_rings: Vec<&Vec<usize>> = built
+                .mol
+                .rings
+                .iter()
+                .filter(|r| r.len() == 5 || r.len() == 6)
+                .collect();
+            assert_eq!(
+                small_rings.len(),
+                5,
+                "MiS1 should have 5 aromatic rings (2 His + 2 Phe + 1 Tyr)"
+            );
+            for ring in small_rings {
+                for i in 0..ring.len() {
+                    let a = ring[i];
+                    let b = ring[(i + 1) % ring.len()];
+                    let pa = built.mol.atoms[a]
+                        .coords_2d
+                        .ok_or_else(|| PeptideError::Topology("missing 2D coords".to_string()))?;
+                    let pb = built.mol.atoms[b]
+                        .coords_2d
+                        .ok_or_else(|| PeptideError::Topology("missing 2D coords".to_string()))?;
+                    let d = ((pa[0] - pb[0]).powi(2) + (pa[1] - pb[1]).powi(2)).sqrt();
+                    assert!(
+                        (1.20..=1.80).contains(&d),
+                        "distorted 2D sidechain ring edge length {d:.3} in {seq}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
 }

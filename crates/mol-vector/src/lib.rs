@@ -229,6 +229,12 @@ mod tests {
             ("Adamantane", "C1C2CC3CC1CC(C2)C3", 30.0, 0),
             ("Methyl-Adamantane", "CC12CC3CC(CC(C3)C1)C2", 25.0, 0),
             ("Camphor", "CC1(C)C2CCC1(C)C(=O)C2", 12.0, 1),
+            (
+                "Baricitinib",
+                "CCS(=O)(=O)N1CC(C1)(CC#N)n2cc(cn2)c3ncnc4c3cc[nH]4",
+                15.0,
+                0,
+            ),
         ] {
             let mut mol = parse_smiles(smi)?;
             generate_2d_coords(&mut mol);

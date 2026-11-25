@@ -269,8 +269,8 @@ enum SubCmd {
         smiles: String,
         #[arg(long)]
         out: PathBuf,
-        #[arg(long, value_enum, default_value_t = Export3dFormat::Pdb)]
-        format: Export3dFormat,
+        #[arg(long, value_enum)]
+        format: Option<Export3dFormat>,
     },
     /// Export a self-contained ChimeraX 3D bundle (.pdb/.sdf + .cxc) and optionally launch ChimeraX.
     Chimerax {
@@ -772,7 +772,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let mut mol = parse_smiles(&smiles)?;
             generate_3d_coords(&mut mol);
-            let txt = match format {
+            let resolved_fmt = format.unwrap_or_else(|| {
+                let ext = out
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase);
+                match ext.as_deref() {
+                    Some("sdf" | "mol") => Export3dFormat::Sdf3d,
+                    _ => Export3dFormat::Pdb,
+                }
+            });
+            let txt = match resolved_fmt {
                 Export3dFormat::Pdb => write_pdb(&mol),
                 Export3dFormat::Sdf3d => write_sdf_v2000_3d(&[&mol]),
             };

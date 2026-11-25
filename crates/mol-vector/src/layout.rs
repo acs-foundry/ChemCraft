@@ -250,18 +250,70 @@ pub fn generate_2d_coords(mol: &mut MolGraph) {
 
             let base_ang = if placed_nbrs.is_empty() {
                 PI / 6.0
+            } else if placed_nbrs.len() == 1 {
+                let pp = coords[placed_nbrs[0]].unwrap_or(pu);
+                let dx = pp[0] - pu[0];
+                let dy = pp[1] - pu[1];
+                (-dy).atan2(-dx)
             } else {
                 let mut sum_x = 0.0;
                 let mut sum_y = 0.0;
+                let mut nbr_angles: Vec<f64> = Vec::with_capacity(placed_nbrs.len());
                 for &pn in &placed_nbrs {
                     let pp = coords[pn].unwrap_or(pu);
                     let dx = pp[0] - pu[0];
                     let dy = pp[1] - pu[1];
-                    let d = dx.hypot(dy).max(1e-6);
-                    sum_x += dx / d;
-                    sum_y += dy / d;
+                    let l = dx.hypot(dy).max(1e-6);
+                    sum_x += dx / l;
+                    sum_y += dy / l;
+                    nbr_angles.push(dy.atan2(dx));
                 }
-                (-sum_y).atan2(-sum_x)
+                let neg_len = sum_x.hypot(sum_y);
+                let neg_ang = (-sum_y).atan2(-sum_x);
+                let min_sep = nbr_angles
+                    .iter()
+                    .map(|&a| {
+                        let mut d = (neg_ang - a).abs();
+                        while d > PI {
+                            d = (2.0 * PI - d).abs();
+                        }
+                        d
+                    })
+                    .fold(PI, f64::min);
+
+                let has_exocyclic_placed = placed_nbrs.iter().any(|&pn| {
+                    mol.adj[u]
+                        .iter()
+                        .find(|&&(nb, _)| nb == pn)
+                        .is_some_and(|&(_, bid)| !mol.bonds[bid].in_ring)
+                });
+
+                // When a ring atom has >= 3 placed neighbors including an exocyclic substituent
+                // (e.g. gem-disubstituted 4-membered azetidine C3 in Baricitinib where 2 ring
+                // edges at ±45° outweigh the exocyclic bond at 180°), `-sum` folds directly onto
+                // the exocyclic bond; bisect the widest open sector instead.
+                if placed_nbrs.len() >= 3 && has_exocyclic_placed && (neg_len < 1e-4 || min_sep < 0.35) {
+                    nbr_angles.sort_by(f64::total_cmp);
+                    let mut best_gap = -1.0_f64;
+                    let mut best_mid = neg_ang;
+                    let m = nbr_angles.len();
+                    for idx in 0..m {
+                        let a1 = nbr_angles[idx];
+                        let a2 = if idx + 1 < m {
+                            nbr_angles[idx + 1]
+                        } else {
+                            nbr_angles[0] + 2.0 * PI
+                        };
+                        let gap = a2 - a1;
+                        if gap > best_gap {
+                            best_gap = gap;
+                            best_mid = a1 + 0.5 * gap;
+                        }
+                    }
+                    best_mid
+                } else {
+                    neg_ang
+                }
             };
 
             let k = unplaced.len();
