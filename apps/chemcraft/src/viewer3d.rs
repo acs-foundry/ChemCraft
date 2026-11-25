@@ -1,4 +1,4 @@
-//! Pure-Rust interactive 3D molecular & peptide ball-and-stick + backbone ribbon viewer
+//! Pure-Rust interactive 3D molecular ball-and-stick + biomolecule backbone ribbon viewer
 //! rendered directly on `egui::Painter` (zero extra GPU/shader dependencies).
 
 use std::f64::consts::PI;
@@ -456,7 +456,7 @@ pub fn render_3d_viewport(
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "3D Viewer — Load SMILES, Draw, or Build a Peptide",
+            "3D Viewer — Load SMILES or Draw a Molecule",
             egui::FontId::proportional(14.0),
             Color32::GRAY,
         );
@@ -550,7 +550,7 @@ pub fn render_3d_viewport(
     let mut items: Vec<DrawItem> =
         Vec::with_capacity(mol.atoms.len() + mol.bonds.len() + hydrogens.len() * 2 + 32);
 
-    // Optional peptide C-alpha backbone spline ribbon
+    // Optional C-alpha backbone spline ribbon for PDB-loaded biomolecules
     if state.show_ribbon {
         let ca_indices: Vec<usize> = mol
             .atoms

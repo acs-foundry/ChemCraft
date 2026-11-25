@@ -107,7 +107,7 @@ pub fn write_chimerax_bundle(
         stem_override
             .or(mol.name.as_deref())
             .unwrap_or(if is_peptide {
-                "chemcraft_peptide"
+                "chemcraft_biomolecule"
             } else {
                 "chemcraft_molecule"
             }),

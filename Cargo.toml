@@ -6,7 +6,6 @@ members = [
     "crates/mol-sar",
     "crates/mol-admet-bridge",
     "crates/mol-synth",
-    "crates/mol-peptide",
     "crates/mol-engine",
     "apps/chemcraft-cli",
     "apps/chemcraft",
@@ -14,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.1"
+version = "2.0.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 

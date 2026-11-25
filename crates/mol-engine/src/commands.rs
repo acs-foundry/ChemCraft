@@ -8,8 +8,8 @@ use mol_admet_bridge::{
     AdmetCraftProvider, AdmetDelta, AdmetProvider, MoleculeEvaluation, compute_admet_delta,
 };
 use mol_graph::{
-    BondOrder, BondStereo, MolAtom, MolGraph, SecondaryStructure, attach_superatom_group,
-    build_peptide, mutate_molecule, parse_cdxml, parse_smiles, resolve_chemical_name,
+    BondOrder, BondStereo, MolAtom, MolGraph, attach_superatom_group, mutate_molecule, parse_cdxml,
+    parse_smiles, resolve_chemical_name,
 };
 use mol_sar::{
     ActivityCliff, MatchedMolecularPair, SarFilter, SarTable, find_activity_cliffs,
@@ -160,10 +160,6 @@ pub enum Command {
     },
     LoadCdxml {
         xml: String,
-    },
-    BuildPeptide {
-        sequence: String,
-        secondary_structure: SecondaryStructure,
     },
     ClearCanvas,
     CleanStructure2D,
@@ -371,26 +367,6 @@ impl CommandRegistry {
                 session.on_canvas_changed();
                 Ok(CommandOutcome {
                     message: format!("Loaded SMILES {}", session.canvas_mol.canonical_smiles()),
-                })
-            }
-            Command::BuildPeptide {
-                sequence,
-                secondary_structure,
-            } => {
-                session.push_undo();
-                let mol = build_peptide(&sequence, secondary_structure)
-                    .map_err(|e| CommandError::Failed(e.to_string()))?;
-                let res_count = mol
-                    .properties
-                    .get("PEPTIDE_RESIDUES")
-                    .cloned()
-                    .unwrap_or_else(|| "?".to_string());
-                let name = mol.name.clone().unwrap_or_else(|| sequence.clone());
-                session.canvas_mol = Arc::new(mol);
-                session.last_mutation_delta = None;
-                session.on_canvas_changed();
-                Ok(CommandOutcome {
-                    message: format!("Built peptide {name} ({res_count} residues, 2D + 3D ready)"),
                 })
             }
             Command::ClearCanvas => {

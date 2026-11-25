@@ -292,7 +292,10 @@ pub fn generate_2d_coords(mol: &mut MolGraph) {
                 // (e.g. gem-disubstituted 4-membered azetidine C3 in Baricitinib where 2 ring
                 // edges at ±45° outweigh the exocyclic bond at 180°), `-sum` folds directly onto
                 // the exocyclic bond; bisect the widest open sector instead.
-                if placed_nbrs.len() >= 3 && has_exocyclic_placed && (neg_len < 1e-4 || min_sep < 0.35) {
+                if placed_nbrs.len() >= 3
+                    && has_exocyclic_placed
+                    && (neg_len < 1e-4 || min_sep < 0.35)
+                {
                     nbr_angles.sort_by(f64::total_cmp);
                     let mut best_gap = -1.0_f64;
                     let mut best_mid = neg_ang;

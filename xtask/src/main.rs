@@ -43,12 +43,6 @@ const WORKSPACE_LAYERS: &[LayerSpec] = &[
         role: "L2 DataWarrior-style SAR Table, MMPs & Activity Cliffs",
     },
     LayerSpec {
-        name: "mol-peptide",
-        rel_dir: "crates/mol-peptide",
-        layer: 2,
-        role: "L2 Peptide, Macrocycle, HELM & NRPS Biosynthesis Studio",
-    },
-    LayerSpec {
         name: "mol-synth",
         rel_dir: "crates/mol-synth",
         layer: 3,
@@ -70,7 +64,7 @@ const WORKSPACE_LAYERS: &[LayerSpec] = &[
         name: "chemcraft",
         rel_dir: "apps/chemcraft",
         layer: 4,
-        role: "L4 Native Desktop 2D Chemistry & Peptide/NRP GUI",
+        role: "L4 Native Desktop 2D & 3D Chemistry GUI",
     },
 ];
 

@@ -2,7 +2,6 @@
 
 mod chem_panels;
 mod library_ui;
-mod peptide_ui;
 mod synth_ui;
 mod viewer3d;
 mod widgets;
@@ -25,15 +24,13 @@ use mol_engine::{
     launch_dockcraft_for_mols, save_chemcraft_atomic,
 };
 use mol_graph::{
-    BondOrder, BondStereo, SUPERATOM_GROUPS, SecondaryStructure, generate_3d_coords,
-    parse_csv_records, parse_dwar, parse_rxn_v2000, parse_sdf, write_cdxml, write_pdb,
-    write_sdf_v2000_3d,
+    BondOrder, BondStereo, SUPERATOM_GROUPS, generate_3d_coords, parse_csv_records, parse_dwar,
+    parse_rxn_v2000, parse_sdf, write_cdxml, write_pdb, write_sdf_v2000_3d,
 };
 use mol_vector::{
     DepictionPreset, ReactionArrow, RingTemplate, STANDARD_BOND_LEN, SceneStyle, VectorScene,
     build_mol_scene, scene_to_eps, scene_to_pdf_bytes, scene_to_png_bytes, scene_to_svg,
 };
-use peptide_ui::{PeptideStudioAction, PeptideStudioState, render_peptide_studio};
 use synth_ui::{SynthAction, SynthModuleState, render_synth_module};
 use viewer3d::{Viewer3dState, render_3d_viewport};
 use widgets::{
@@ -77,9 +74,6 @@ struct ChemCraftApp {
     inspector_tab: InspectorTab,
     reaction_state: ReactionPanelState,
     viewer_3d: Viewer3dState,
-    peptide_seq: String,
-    peptide_ss: SecondaryStructure,
-    peptide_studio: PeptideStudioState,
     library_win: LibraryWindowState,
     synth_module: SynthModuleState,
     sar_panel_open: bool,
@@ -137,9 +131,6 @@ impl ChemCraftApp {
             inspector_tab: InspectorTab::Analysis,
             reaction_state: ReactionPanelState::default(),
             viewer_3d: Viewer3dState::default(),
-            peptide_seq: "Ac-Ala-Gly-Tyr-Ser-NH2".to_string(),
-            peptide_ss: SecondaryStructure::AlphaHelix,
-            peptide_studio: PeptideStudioState::default(),
             library_win: LibraryWindowState::default(),
             synth_module: SynthModuleState::default(),
             sar_panel_open: false,
@@ -155,7 +146,7 @@ impl ChemCraftApp {
             current_project_path: None,
             dirty: false,
             status_msg: format!(
-                "Ready — ChemCraft v{} (2D/3D + CDXML/RXN + NMR/MS + Peptides + AdmetCraft/DockCraft)",
+                "Ready — ChemCraft v{} (2D/3D + CDXML/RXN + NMR/MS + AdmetCraft/DockCraft)",
                 env!("CARGO_PKG_VERSION")
             ),
             dark_mode: false,
@@ -1250,51 +1241,6 @@ impl eframe::App for ChemCraftApp {
         }
         self.handle_shortcuts(ctx);
         self.render_palette(ctx);
-        match render_peptide_studio(ctx, &mut self.peptide_studio, &self.export_dir) {
-            PeptideStudioAction::None => {}
-            PeptideStudioAction::LoadMolOnCanvas(mol) => {
-                self.session.push_undo_checkpoint();
-                self.session.canvas_mol = std::sync::Arc::new(mol);
-                self.smiles_bar = self.session.canvas_mol.canonical_smiles();
-                self.session.on_canvas_changed();
-                self.dirty = true;
-                self.viewer_3d.reset();
-                if self.view_mode == ViewMode::View2D {
-                    self.view_mode = ViewMode::Split2D3D;
-                }
-                self.status_msg = format!(
-                    "Peptide & NRP Studio: loaded {} onto 2D+3D canvas",
-                    self.session
-                        .canvas_mol
-                        .name
-                        .as_deref()
-                        .unwrap_or("Peptide/NRP")
-                );
-            }
-            PeptideStudioAction::LoadScanIntoSar(table) => {
-                self.session.sar_table = std::sync::Arc::new(table);
-                self.session.recompute_sar_analytics();
-                self.sar_panel_open = true;
-                self.dirty = true;
-                self.status_msg = format!(
-                    "Peptide & NRP Studio: loaded {} scan variants into SAR Explorer",
-                    self.session.sar_table.rows.len()
-                );
-            }
-            PeptideStudioAction::SendToDockCraft(mol) => {
-                self.session.canvas_mol = std::sync::Arc::new(mol);
-                self.smiles_bar = self.session.canvas_mol.canonical_smiles();
-                self.send_to_dockcraft(false);
-            }
-            PeptideStudioAction::OpenInChimeraX(mol) => {
-                self.session.canvas_mol = std::sync::Arc::new(mol);
-                self.smiles_bar = self.session.canvas_mol.canonical_smiles();
-                self.open_in_chimerax();
-            }
-            PeptideStudioAction::Status(msg) => {
-                self.status_msg = msg;
-            }
-        }
         match render_library_window(ctx, &mut self.library_win, &self.export_dir) {
             LibraryAction::None => {}
             LibraryAction::LoadHitOnCanvas(mut mol) => {
@@ -1534,7 +1480,7 @@ impl eframe::App for ChemCraftApp {
                         "3D: Show Hydrogens (+H)",
                     );
                     ui.checkbox(&mut self.viewer_3d.show_labels, "3D: Atom Labels");
-                    ui.checkbox(&mut self.viewer_3d.show_ribbon, "3D: Peptide Ribbon");
+                    ui.checkbox(&mut self.viewer_3d.show_ribbon, "3D: Biomolecule Ribbon");
                     ui.checkbox(&mut self.viewer_3d.auto_spin, "3D: Auto-Spin");
                     if ui.button("3D: Rebuild Conformer").clicked() {
                         let mut mol = (*self.session.canvas_mol).clone();
@@ -1553,10 +1499,6 @@ impl eframe::App for ChemCraftApp {
                 });
 
                 ui.menu_button("Tools", |ui| {
-                    if ui.button("Peptide & NRP Studio...").clicked() {
-                        self.peptide_studio.open = true;
-                        ui.close_menu();
-                    }
                     if ui.button("Screening Libraries (In Silico)...").clicked() {
                         self.library_win.open = true;
                         ui.close_menu();
@@ -1681,8 +1623,6 @@ impl eframe::App for ChemCraftApp {
                 ui.selectable_value(&mut self.view_mode, ViewMode::View3D, "3D");
                 ui.selectable_value(&mut self.view_mode, ViewMode::Split2D3D, "Split");
                 ui.separator();
-                ui.toggle_value(&mut self.peptide_studio.open, "Peptides / NRP")
-                    .on_hover_text("Abrir/ocultar Peptide & NRP Studio (macrociclos, HELM, NRPS BGC, bRo5, SPPS y scans)");
                 ui.toggle_value(&mut self.library_win.open, "Libraries");
                 ui.toggle_value(&mut self.sar_panel_open, "SAR");
                 ui.toggle_value(&mut self.synth_module.open, "Synth Module")
@@ -1844,31 +1784,6 @@ impl eframe::App for ChemCraftApp {
                     );
 
                     ui.add_space(6.0);
-                    ui.strong("Quick Peptide (2D + 3D)");
-                    ui.separator();
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.peptide_seq)
-                            .hint_text("Ala-Gly-Tyr-Ser / AGYS"),
-                    );
-                    ui.horizontal(|ui| {
-                        if ui.button("Build Peptide").clicked() {
-                            let seq = self.peptide_seq.clone();
-                            let ss = self.peptide_ss;
-                            self.run_cmd(Command::BuildPeptide {
-                                sequence: seq,
-                                secondary_structure: ss,
-                            });
-                            self.viewer_3d.reset();
-                            if self.view_mode == ViewMode::View2D {
-                                self.view_mode = ViewMode::Split2D3D;
-                            }
-                        }
-                        if ui.button("NRP Studio...").clicked() {
-                            self.peptide_studio.open = true;
-                        }
-                    });
-
-                    ui.add_space(8.0);
                     ui.strong("Import (.cdxml/.rxn/.sdf/.dwar/.csv)");
                     ui.add(
                         egui::TextEdit::singleline(&mut self.file_path_bar)
@@ -2489,9 +2404,6 @@ mod tests {
         let mut app = ChemCraftApp::new();
         assert!(!app.sar_panel_open);
         assert!(!app.synth_module.open);
-        assert!(!app.peptide_studio.open);
-        assert!(app.peptide_studio.build_current().is_some());
-        assert!(app.peptide_studio.compile_active_bgc().is_some());
         assert!(app.synth_module.last_plan.is_none());
         app.synth_module.run_for_molecule(&app.session.canvas_mol);
         assert!(

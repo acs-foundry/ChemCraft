@@ -655,14 +655,13 @@ dependencies = [
 
 [[package]]
 name = "chemcraft"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "eframe",
  "egui",
  "mol-admet-bridge",
  "mol-engine",
  "mol-graph",
- "mol-peptide",
  "mol-sar",
  "mol-synth",
  "mol-vector",
@@ -671,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "chemcraft-cli"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "clap",
  "craftbio-report",
@@ -679,7 +678,6 @@ dependencies = [
  "mol-admet-bridge",
  "mol-engine",
  "mol-graph",
- "mol-peptide",
  "mol-sar",
  "mol-synth",
  "mol-vector",
@@ -2015,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "mol-admet-bridge"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "csv",
  "flate2",
@@ -2028,7 +2026,7 @@ dependencies = [
 
 [[package]]
 name = "mol-engine"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "crc32fast",
  "flate2",
@@ -2046,7 +2044,7 @@ dependencies = [
 
 [[package]]
 name = "mol-graph"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "csv",
  "serde",
@@ -2054,19 +2052,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "mol-peptide"
-version = "1.0.1"
-dependencies = [
- "mol-admet-bridge",
- "mol-graph",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "mol-sar"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "mol-admet-bridge",
  "mol-graph",
@@ -2077,7 +2064,7 @@ dependencies = [
 
 [[package]]
 name = "mol-synth"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "mol-graph",
  "mol-sar",
@@ -2089,7 +2076,7 @@ dependencies = [
 
 [[package]]
 name = "mol-vector"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "flate2",
  "mol-graph",
@@ -4233,7 +4220,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "1.0.1"
+version = "2.0.0"
 
 [[package]]
 name = "yoke"

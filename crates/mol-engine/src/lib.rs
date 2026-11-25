@@ -204,41 +204,6 @@ mod tests {
     }
 
     #[test]
-    fn peptide_command_and_chimerax_bundle_export_work() -> Result<(), Box<dyn std::error::Error>> {
-        let mut session = ChemSession::new();
-        CommandRegistry::execute(
-            &mut session,
-            Command::BuildPeptide {
-                sequence: "Ac-Ala-Gly-Tyr-Ser-NH2".to_string(),
-                secondary_structure: mol_graph::SecondaryStructure::AlphaHelix,
-            },
-        )?;
-        assert!(!session.canvas_mol.atoms.is_empty());
-
-        let out_dir = std::env::temp_dir().join("chemcraft_chimerax_unit_test");
-        let _ = std::fs::remove_dir_all(&out_dir);
-        let bundle = write_chimerax_bundle(&session.canvas_mol, &out_dir, Some("agys_helix"))?;
-        assert!(bundle.is_peptide);
-        assert!(bundle.script_path.exists());
-        assert!(bundle.structure_path.exists());
-        let cxc = std::fs::read_to_string(&bundle.script_path)?;
-        assert!(cxc.contains("open agys_helix.pdb"));
-        assert!(cxc.contains("cartoon"));
-        assert!(cxc.contains("hbonds reveal true"));
-        let _ = std::fs::remove_dir_all(&out_dir);
-
-        let dock_dir = std::env::temp_dir().join("chemcraft_dockcraft_unit_test");
-        let _ = std::fs::remove_dir_all(&dock_dir);
-        let d_bundle = write_dockcraft_bundle(&[&session.canvas_mol], &dock_dir, Some("agys_lig"))?;
-        assert_eq!(d_bundle.molecule_count, 1);
-        assert!(d_bundle.sdf_path.exists());
-        assert!(d_bundle.smi_path.exists());
-        assert!(d_bundle.pdb_path.as_ref().is_some_and(|p| p.exists()));
-        let _ = std::fs::remove_dir_all(&dock_dir);
-        Ok(())
-    }
-
-    #[test]
     fn chemical_library_streaming_gzip_ph74_and_funnel_screening_work()
     -> Result<(), Box<dyn std::error::Error>> {
         let base = std::env::temp_dir().join("chemcraft_lib_screen_test");

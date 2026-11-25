@@ -14,7 +14,6 @@ egui.workspace = true
 mol-admet-bridge = { path = "../../crates/mol-admet-bridge" }
 mol-engine = { path = "../../crates/mol-engine" }
 mol-graph = { path = "../../crates/mol-graph" }
-mol-peptide = { path = "../../crates/mol-peptide" }
 mol-sar = { path = "../../crates/mol-sar" }
 mol-synth = { path = "../../crates/mol-synth" }
 mol-vector = { path = "../../crates/mol-vector" }
