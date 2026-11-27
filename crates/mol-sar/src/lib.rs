@@ -5,10 +5,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dbtl;
 pub mod fp;
 pub mod mmp;
 pub mod table;
 
+pub use dbtl::{
+    DbtlCompoundSummary, DbtlIngestReport, ingest_experimental_assay_text, render_dbtl_sar_csv,
+    render_next_round_seeds_smi, render_qsar_recalibration_csv,
+};
 pub use fp::MorganFp;
 pub use mmp::{
     ActivityCliff, DuplicatePair, MatchedMolecularPair, find_activity_cliffs,

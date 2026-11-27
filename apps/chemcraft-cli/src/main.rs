@@ -22,10 +22,12 @@ use mol_graph::{
 };
 use mol_sar::{
     SarFilter, SarTable, find_activity_cliffs, find_duplicate_compounds,
-    find_matched_molecular_pairs,
+    find_matched_molecular_pairs, ingest_experimental_assay_text, render_dbtl_sar_csv,
+    render_next_round_seeds_smi, render_qsar_recalibration_csv,
 };
 use mol_synth::{
-    RetroConfig, StockCatalog, default_stock_catalog, default_stock_tsv_path, plan_retrosynthesis,
+    E3RecruiterPreset, RetroConfig, StockCatalog, default_stock_catalog, default_stock_tsv_path,
+    enumerate_protac_library, enumerate_rgroup_library, plan_retrosynthesis,
 };
 use mol_vector::{
     DepictionPreset, SceneStyle, build_mol_scene, generate_2d_coords, scene_to_eps,
@@ -282,6 +284,54 @@ enum SubCmd {
         push_live: bool,
         #[arg(long)]
         json: bool,
+    },
+    /// Enumerate a combinatorial R-group/Markush library or assemble a bifunctional PROTAC library (CRBN/VHL/IAP + alkyl/PEG/rigid linkers) into 3D SDF / SMILES / JSON.
+    Enumerate {
+        /// Mode: `rgroup` (Markush `[*]`/`[R1]`/`[R2]` scaffold) or `protac` (warhead + linkers + E3 recruiter).
+        #[arg(long, default_value = "rgroup")]
+        mode: String,
+        /// Scaffold SMILES with `[*]` / `[R1]` / `[R2]` (for `--mode rgroup`).
+        #[arg(long)]
+        scaffold: Option<String>,
+        /// POI warhead SMILES with optional `[*]` exit vector (for `--mode protac`).
+        #[arg(long)]
+        warhead: Option<String>,
+        /// E3 ligase recruiter preset for PROTAC mode (`crbn` | `vhl` | `iap` | `all`).
+        #[arg(long, default_value = "crbn")]
+        e3: String,
+        /// Optional custom R1 or linker file (`NAME\tSMILES` or one SMILES per line).
+        #[arg(long)]
+        r1_or_linkers: Option<PathBuf>,
+        /// Optional custom R2 file (`NAME\tSMILES` or one SMILES per line).
+        #[arg(long)]
+        r2: Option<PathBuf>,
+        /// Maximum enumerated compounds to keep.
+        #[arg(long, default_value_t = 250)]
+        max_compounds: usize,
+        /// Output path (`.sdf` exports 3D conformers for DockCraft; `.smi` exports SMILES; `.json` exports full metadata).
+        #[arg(long)]
+        out: PathBuf,
+        /// Optional JSON summary path.
+        #[arg(long)]
+        out_json: Option<PathBuf>,
+    },
+    /// DBTL Experimental Assay Ingestion (`Test -> Learn`): ingest lab IC50/EC50/Kd CSV/TSV, compute ADMET + LE/LLE + MMPs + Activity Cliffs, and emit Round-2 seeds & QSAR calibration CSV.
+    AssayIngest {
+        /// Experimental assay CSV or TSV (`compound_id,smiles,ic50_nm|pic50[,series]`).
+        #[arg(long)]
+        assay: PathBuf,
+        /// Optional existing SAR CSV/SDF/DWAR table to merge with.
+        #[arg(long)]
+        existing_sar: Option<PathBuf>,
+        /// Minimum ECFP4 Tanimoto for SALI activity cliff detection.
+        #[arg(long, default_value_t = 0.40)]
+        min_tanimoto: f64,
+        /// Number of top high-potency/LLE seeds to export for Round 2.
+        #[arg(long, default_value_t = 10)]
+        top_seeds: usize,
+        /// Output directory receiving `dbtl_report.json`, `sar_updated.csv`, `qsar_train_ready.csv`, and `next_round_seeds.smi`.
+        #[arg(long)]
+        out_dir: PathBuf,
     },
     /// Start the hardened MCP server (stdio or TCP with token + sandbox).
     Mcp {
@@ -555,6 +605,149 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "stoichiometry": stoich,
                 }))?
             );
+        }
+        SubCmd::Enumerate {
+            mode,
+            scaffold,
+            warhead,
+            e3,
+            r1_or_linkers,
+            r2,
+            max_compounds,
+            out,
+            out_json,
+        } => {
+            let load_frags =
+                |p: &Path| -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+                    let txt = std::fs::read_to_string(p)?;
+                    let mut v = Vec::new();
+                    for (idx, line) in txt.lines().enumerate() {
+                        let s = line.trim();
+                        if s.is_empty() || s.starts_with('#') {
+                            continue;
+                        }
+                        if let Some((a, b)) = s.split_once('\t') {
+                            v.push((a.trim().to_string(), b.trim().to_string()));
+                        } else if let Some((a, b)) = s.split_once(',') {
+                            v.push((a.trim().to_string(), b.trim().to_string()));
+                        } else {
+                            v.push((format!("F{}", idx + 1), s.to_string()));
+                        }
+                    }
+                    Ok(v)
+                };
+            let custom1 = match r1_or_linkers {
+                Some(ref p) => Some(load_frags(p)?),
+                None => None,
+            };
+            let custom2 = match r2 {
+                Some(ref p) => Some(load_frags(p)?),
+                None => None,
+            };
+            let mut lib = if mode.eq_ignore_ascii_case("protac") {
+                let wh = warhead
+                    .as_deref()
+                    .ok_or("PROTAC mode requires --warhead <SMILES>")?;
+                let preset = match e3.to_ascii_lowercase().as_str() {
+                    "crbn" => E3RecruiterPreset::Crbn,
+                    "vhl" => E3RecruiterPreset::Vhl,
+                    "iap" => E3RecruiterPreset::Iap,
+                    "all" => E3RecruiterPreset::All,
+                    other => {
+                        return Err(format!(
+                            "unknown --e3 preset '{other}' (expected crbn|vhl|iap|all)"
+                        )
+                        .into());
+                    }
+                };
+                enumerate_protac_library(wh, preset, custom1.as_deref(), max_compounds)
+            } else {
+                let scaf = scaffold
+                    .as_deref()
+                    .or(warhead.as_deref())
+                    .ok_or("R-group mode requires --scaffold <SMILES>")?;
+                enumerate_rgroup_library(
+                    scaf,
+                    custom1.as_deref(),
+                    custom2.as_deref(),
+                    max_compounds,
+                )
+            };
+
+            let ext = out
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if let Some(parent) = out.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)?;
+            }
+            if ext == "smi" {
+                let mut smi_txt = String::new();
+                for c in &lib.compounds {
+                    smi_txt.push_str(&format!("{}\t{}\n", c.canonical_smiles, c.id));
+                }
+                std::fs::write(&out, smi_txt)?;
+            } else if ext == "json" {
+                std::fs::write(&out, serde_json::to_string_pretty(&lib)?)?;
+            } else {
+                let mut mols = Vec::with_capacity(lib.compounds.len());
+                for c in &mut lib.compounds {
+                    if let Some(mut m) = c.mol.take() {
+                        m.properties
+                            .insert("MW".to_string(), format!("{:.2}", c.mw));
+                        m.properties
+                            .insert("LinkerOrR1".to_string(), c.linker_or_r1.clone());
+                        m.properties
+                            .insert("RecruiterOrR2".to_string(), c.recruiter_or_r2.clone());
+                        m.properties
+                            .insert("bRo5_OK".to_string(), c.bro5_ok.to_string());
+                        ensure_3d_coords(&mut m);
+                        mols.push(m);
+                    }
+                }
+                let refs: Vec<&MolGraph> = mols.iter().collect();
+                let sdf = write_sdf_v2000_3d(&refs);
+                std::fs::write(&out, sdf)?;
+            }
+            if let Some(jpath) = out_json {
+                if let Some(parent) = jpath.parent()
+                    && !parent.as_os_str().is_empty()
+                {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&jpath, serde_json::to_string_pretty(&lib)?)?;
+            }
+            println!("{}", serde_json::to_string_pretty(&lib)?);
+        }
+        SubCmd::AssayIngest {
+            assay,
+            existing_sar,
+            min_tanimoto,
+            top_seeds,
+            out_dir,
+        } => {
+            let assay_txt = std::fs::read_to_string(&assay)?;
+            let base = match existing_sar {
+                Some(ref p) => Some(load_table_from_path(p)?),
+                None => None,
+            };
+            let (table, report) = ingest_experimental_assay_text(&assay_txt, base, min_tanimoto)?;
+            std::fs::create_dir_all(&out_dir)?;
+            let report_json = serde_json::to_string_pretty(&report)?;
+            std::fs::write(out_dir.join("dbtl_report.json"), &report_json)?;
+            std::fs::write(out_dir.join("sar_updated.csv"), render_dbtl_sar_csv(&table))?;
+            std::fs::write(
+                out_dir.join("qsar_train_ready.csv"),
+                render_qsar_recalibration_csv(&table),
+            )?;
+            std::fs::write(
+                out_dir.join("next_round_seeds.smi"),
+                render_next_round_seeds_smi(&report, top_seeds),
+            )?;
+            println!("{report_json}");
         }
         SubCmd::Mcp {
             read_root,

@@ -6,6 +6,7 @@
 //! `Synth Module`.
 
 pub mod data_dir;
+pub mod enumerate;
 pub mod retro_star;
 pub mod stock;
 pub mod templates;
@@ -13,6 +14,10 @@ pub mod templates;
 use mol_graph::{MolError, parse_smiles};
 
 pub use data_dir::{building_blocks_dir, craft_data_dir, default_stock_tsv_path};
+pub use enumerate::{
+    E3RecruiterPreset, EnumerateMode, EnumeratedCompound, EnumeratedLibrary,
+    enumerate_protac_library, enumerate_rgroup_library, shift_ring_indices,
+};
 pub use retro_star::{
     RetroConfig, StartingMaterial, SynthesisPlan, SynthesisRoute, SynthesisStep,
     plan_retrosynthesis,
