@@ -412,7 +412,7 @@ pub fn render_3d_viewport(
 ) -> Response {
     let resp = ui.interact(
         rect,
-        ui.id().with("chemcraft_3d_view"),
+        ui.scope_id().with("chemcraft_3d_view"),
         Sense::click_and_drag(),
     );
 

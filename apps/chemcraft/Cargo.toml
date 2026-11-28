@@ -9,6 +9,7 @@ description = "ChemCraft native desktop studio: VectorCraft 2D molecular drawing
 workspace = true
 
 [dependencies]
+craftbio-ui.workspace = true
 eframe.workspace = true
 egui.workspace = true
 mol-admet-bridge = { path = "../../crates/mol-admet-bridge" }
@@ -17,4 +18,5 @@ mol-graph = { path = "../../crates/mol-graph" }
 mol-sar = { path = "../../crates/mol-sar" }
 mol-synth = { path = "../../crates/mol-synth" }
 mol-vector = { path = "../../crates/mol-vector" }
+serde.workspace = true
 serde_json.workspace = true

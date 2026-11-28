@@ -385,11 +385,9 @@ pub fn draw_sar_scatter(
 
     if let Some(hi) = hovered_idx {
         let r = &rows[hi];
-        egui::show_tooltip_at_pointer(
-            ui.ctx(),
-            ui.layer_id(),
-            egui::Id::new("sar_scatter_tip"),
-            |ui| {
+        egui::Tooltip::for_widget(&response)
+            .at_pointer()
+            .show(|ui| {
                 ui.set_min_width(180.0);
                 ui.strong(&r.name);
                 ui.label(format!(
@@ -404,8 +402,7 @@ pub fn draw_sar_scatter(
                     ));
                 }
                 let _ = paint_mol_thumbnail(ui, &r.mol, &[], Vec2::new(170.0, 110.0), dark_mode);
-            },
-        );
+            });
     }
 
     clicked_idx

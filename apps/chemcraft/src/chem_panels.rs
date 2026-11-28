@@ -40,40 +40,6 @@ impl Default for ReactionPanelState {
     }
 }
 
-/// Launch native Linux file picker (`zenity` or `kdialog`) for opening structure/library files.
-pub fn pick_open_file_native() -> Option<String> {
-    if let Ok(out) = ProcessCommand::new("zenity")
-        .args([
-            "--file-selection",
-            "--title=Open Chemical Structure, Project, or Library",
-            "--file-filter=Chemistry (*.chemcraft *.cdxml *.rxn *.sdf *.mol *.smi *.dwar *.csv) | *.chemcraft *.cdxml *.rxn *.sdf *.mol *.smi *.dwar *.csv",
-            "--file-filter=All files | *",
-        ])
-        .output()
-        && out.status.success()
-    {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(s);
-        }
-    }
-    if let Ok(out) = ProcessCommand::new("kdialog")
-        .args([
-            "--getopenfilename",
-            ".",
-            "*.chemcraft *.cdxml *.rxn *.sdf *.mol *.smi *.dwar *.csv|Chemistry Files",
-        ])
-        .output()
-        && out.status.success()
-    {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(s);
-        }
-    }
-    None
-}
-
 /// Launch native Linux Save As dialog (`zenity` or `kdialog`).
 pub fn pick_save_file_native(
     title: &str,
@@ -105,32 +71,6 @@ pub fn pick_save_file_native(
     let kd_filter = format!("{filter_glob}|{filter_label}");
     if let Ok(out) = ProcessCommand::new("kdialog")
         .args(["--getsavefilename", default_path, &kd_filter])
-        .output()
-        && out.status.success()
-    {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(s);
-        }
-    }
-    None
-}
-
-/// Launch native Linux directory picker (`zenity` or `kdialog`).
-pub fn pick_folder_native(title: &str, start_dir: &str) -> Option<String> {
-    let title_arg = format!("--title={title}");
-    if let Ok(out) = ProcessCommand::new("zenity")
-        .args(["--file-selection", "--directory", &title_arg])
-        .output()
-        && out.status.success()
-    {
-        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !s.is_empty() {
-            return Some(s);
-        }
-    }
-    if let Ok(out) = ProcessCommand::new("kdialog")
-        .args(["--getexistingdirectory", start_dir])
         .output()
         && out.status.success()
     {
